@@ -12,11 +12,12 @@ export default function Hero() {
                         initial={{ opacity: 0, y: 30 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.1 }}
-                        className="text-6xl font-bold leading-tight text-primary mb-4"
+                        className="text-6xl font-black leading-[1.1] text-[#1A2B3D] mb-6"
                     >
-                        Build the Future with{" "}
-                        <span className="text-accent underline decoration-brandYellow/30 underline-offset-8">
-                            Droga Group
+                        Build the Future <br />
+                        with <span className="relative">
+                            <span className="relative z-10 text-[#1F7A6E]">Droga Group</span>
+                            <span className="absolute bottom-2 left-0 w-full h-4 bg-[#F2F44D]/30 -z-0"></span>
                         </span>
                     </motion.h1>
 
@@ -24,7 +25,7 @@ export default function Hero() {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.2 }}
-                        className="text-lg text-primary/70 font-medium leading-relaxed mb-10 max-w-xl"
+                        className="text-lg text-gray-500 font-medium leading-relaxed mb-12 max-w-xl"
                     >
                         Join a team of innovators, creators, and problem-solvers who are
                         redefining what&apos;s possible in technology.
@@ -34,17 +35,17 @@ export default function Hero() {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.3 }}
-                        className="relative max-w-lg mb-12"
+                        className="relative max-w-xl mb-12 group"
                     >
-                        <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
-                            <span className="text-primary/40 text-xl">🔍</span>
+                        <div className="absolute inset-y-0 left-6 flex items-center pointer-events-none">
+                            <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                         </div>
                         <input
                             type="text"
                             placeholder="Search jobs by title, skill, or location..."
-                            className="w-full bg-white border border-primary/10 rounded-2xl py-5 pl-14 pr-32 shadow-2xl shadow-primary/5 focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all text-primary font-medium"
+                            className="w-full bg-[#FAFAFA] border border-gray-100 rounded-[28px] py-6 pl-16 pr-40 shadow-sm focus:outline-none focus:ring-4 focus:ring-[#1F7A6E]/5 focus:bg-white transition-all text-[#1A2B3D] font-bold text-sm"
                         />
-                        <button className="absolute right-2.5 top-2.5 bg-primary text-white font-bold px-6 py-2.5 rounded-xl hover:bg-black transition-all">
+                        <button className="absolute right-3 top-3 bottom-3 bg-[#0D3B34] text-white font-black text-[11px] uppercase tracking-widest px-10 rounded-[20px] hover:bg-black transition-all">
                             Find Jobs
                         </button>
                     </motion.div>

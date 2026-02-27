@@ -144,13 +144,26 @@ function CareersContent() {
     return (
         <div className="min-h-screen bg-[#F5F6FA]">
             {/* Guest Navbar */}
-            <nav className="bg-[#1A2B3D] text-white px-8 py-5 border-b border-white/5">
+            <nav className="bg-white border-b border-gray-100 px-8 py-5">
                 <div className="max-w-[1200px] mx-auto flex justify-between items-center">
-                    <div className="flex items-center gap-1">
-                        <span className="font-black text-xl tracking-tighter">DROGA</span>
-                        <span className="font-light text-xl tracking-normal opacity-50">CAREERS</span>
-                    </div>
-                    <Link href="/login" className="text-xs font-black uppercase tracking-widest text-white/60 hover:text-white transition-colors">
+                    <Link href="/" className="flex flex-col group relative">
+                        <div className="flex items-center">
+                            <span className="text-[#1A2B3D] font-black text-xl tracking-tight">
+                                DROGA
+                            </span>
+                            <span className="text-[#1F7A6E] font-medium text-xl tracking-tight ml-1.5">
+                                GROUP
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 -mt-0.5">
+                            <div className="h-[0.5px] w-3 bg-[#1F7A6E]/40" />
+                            <span className="text-[7px] font-black uppercase tracking-[0.3em] text-[#1A2B3D]/60 whitespace-nowrap">
+                                Hiring Hub
+                            </span>
+                            <div className="h-[0.5px] w-full bg-[#1F7A6E]/40 flex-1" />
+                        </div>
+                    </Link>
+                    <Link href="/login" className="text-[10px] font-black uppercase tracking-widest text-[#1A2B3D]/40 hover:text-[#1F7A6E] transition-colors">
                         Internal Login
                     </Link>
                 </div>
@@ -346,8 +359,8 @@ function CareersContent() {
                                                     </select>
                                                 </div>
                                                 <div className="col-span-2">
-                                                    <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Professional Background</label>
-                                                    <textarea rows={3} className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:border-[#1F7A6E] font-bold text-[#1A2B3D] text-sm" value={formData.professional_background} onChange={(e) => setFormData({ ...formData, professional_background: e.target.value })} />
+                                                    <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Professional Background / Profile Abstract</label>
+                                                    <textarea rows={3} className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:border-[#1F7A6E] font-bold text-[#1A2B3D] text-sm" placeholder="Summarize your professional experience..." value={formData.professional_background} onChange={(e) => setFormData({ ...formData, professional_background: e.target.value })} />
                                                 </div>
                                                 <div className="col-span-2">
                                                     <label className="block text-[10px] font-black text-gray-400 uppercase mb-2">Years of Experience</label>

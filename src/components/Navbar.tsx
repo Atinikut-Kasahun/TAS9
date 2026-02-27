@@ -53,6 +53,25 @@ export default function Navbar({ user, onLogout }: { user: User; onLogout: () =>
 
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [hasInterviewsToday, setHasInterviewsToday] = useState(false);
+    const [showCalendarTooltip, setShowCalendarTooltip] = useState(false);
+
+    useEffect(() => {
+        const checkInterviewsToday = async () => {
+            if (roleSlug === 'ta_manager') return; // Only managers see this in nav
+            try {
+                const interviews = await apiFetch('/v1/interviews?status=scheduled');
+                if (interviews && Array.isArray(interviews)) {
+                    const todayStr = new Date().toISOString().split('T')[0];
+                    const found = interviews.some((i: any) => i.scheduled_at && i.scheduled_at.startsWith(todayStr));
+                    setHasInterviewsToday(found);
+                }
+            } catch (e) {
+                console.error('Failed to check interviews', e);
+            }
+        };
+        checkInterviewsToday();
+    }, [roleSlug]);
 
     useEffect(() => {
         const fetchNotifications = async () => {
@@ -184,6 +203,39 @@ export default function Navbar({ user, onLogout }: { user: User; onLogout: () =>
             </div>
 
             <div className="flex items-center gap-6">
+                {/* Interview Calendar Icon (Only for Managers) */}
+                {(roleSlug === 'hiring_manager' || roleSlug === 'hr_manager') && (
+                    <div className="relative group">
+                        <Link
+                            href="/dashboard?tab=Calendar"
+                            onMouseEnter={() => setShowCalendarTooltip(true)}
+                            onMouseLeave={() => setShowCalendarTooltip(false)}
+                            className={`relative transition-colors ${activeTabParam === 'Calendar' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            {hasInterviewsToday && (
+                                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-[#1A2B3D] animate-pulse" />
+                            )}
+                        </Link>
+
+                        {/* Tooltip */}
+                        <AnimatePresence>
+                            {showCalendarTooltip && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: 10 }}
+                                    className="absolute left-1/2 -translate-x-1/2 top-full mt-2 px-2 py-1 bg-gray-800 text-white text-[10px] font-black uppercase tracking-widest rounded whitespace-nowrap z-[130]"
+                                >
+                                    Interview Calendar
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+                )}
+
                 {/* Search icon */}
                 <div className="relative flex items-center">
                     <AnimatePresence>
@@ -195,7 +247,14 @@ export default function Navbar({ user, onLogout }: { user: User; onLogout: () =>
                                 transition={{ type: 'spring', bounce: 0, duration: 0.3 }}
                                 type="text"
                                 value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    setSearchQuery(val);
+                                    const url = new URL(window.location.href);
+                                    if (val) url.searchParams.set('search', val);
+                                    else url.searchParams.delete('search');
+                                    window.history.replaceState({}, '', url);
+                                }}
                                 placeholder="Search candidates, jobs..."
                                 className="absolute right-8 bg-[#2D455A] text-white placeholder-gray-400 text-[11px] font-black tracking-widest px-4 py-2 rounded-lg border border-white/10 focus:outline-none focus:border-[#1F7A6E] z-[110]"
                                 autoFocus
@@ -203,7 +262,17 @@ export default function Navbar({ user, onLogout }: { user: User; onLogout: () =>
                         )}
                     </AnimatePresence>
                     <button
-                        onClick={() => setIsSearchOpen(!isSearchOpen)}
+                        onClick={() => {
+                            const opening = !isSearchOpen;
+                            setIsSearchOpen(opening);
+                            if (!opening) {
+                                // Clear search when closing
+                                setSearchQuery('');
+                                const url = new URL(window.location.href);
+                                url.searchParams.delete('search');
+                                window.history.replaceState({}, '', url);
+                            }
+                        }}
                         className={`transition-colors relative z-[120] ${isSearchOpen ? 'text-white' : 'text-gray-400 hover:text-white'}`}
                     >
                         {isSearchOpen ? (

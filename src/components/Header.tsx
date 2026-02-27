@@ -44,35 +44,20 @@ export default function Header() {
                 {/* Logo & Brand */}
                 <Link href="/" className="flex flex-col group relative">
                     <div className="flex items-center">
-                        <motion.span
-                            initial={{ x: -10, opacity: 0 }}
-                            animate={{ x: 0, opacity: 1 }}
-                            transition={{ duration: 0.5 }}
-                            className="text-primary font-black text-3xl tracking-tighter"
-                        >
+                        <span className="text-[#1A2B3D] font-black text-3xl tracking-tight">
                             DROGA
-                        </motion.span>
-                        <motion.span
-                            initial={{ x: 10, opacity: 0 }}
-                            animate={{ x: 0, opacity: 1 }}
-                            transition={{ duration: 0.5, delay: 0.1 }}
-                            className="text-accent font-light text-3xl tracking-normal ml-1.5"
-                        >
+                        </span>
+                        <span className="text-[#1F7A6E] font-medium text-3xl tracking-tight ml-2">
                             GROUP
-                        </motion.span>
+                        </span>
                     </div>
-                    <motion.div
-                        initial={{ y: 5, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ duration: 0.5, delay: 0.3 }}
-                        className="flex items-center gap-2 -mt-1"
-                    >
-                        <div className="h-[1px] w-4 bg-accent/30" />
-                        <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-primary/60">
+                    <div className="flex items-center gap-2 -mt-0.5">
+                        <div className="h-[0.5px] w-4 bg-[#1F7A6E]/40" />
+                        <span className="text-[9px] font-black uppercase tracking-[0.3em] text-[#1A2B3D]/60 whitespace-nowrap">
                             Hiring Hub
                         </span>
-                        <div className="h-[1px] w-full bg-accent/30 flex-1" />
-                    </motion.div>
+                        <div className="h-[0.5px] w-full bg-[#1F7A6E]/40 flex-1" />
+                    </div>
                 </Link>
 
                 {/* Nav */}
@@ -99,7 +84,7 @@ export default function Header() {
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ duration: 0.5, delay: i * 0.1 }}
                                 href={`#${item.toLowerCase().replace(" ", "-")}`}
-                                className="text-sm font-semibold transition-colors hover:text-accent text-primary"
+                                className="text-sm font-black transition-colors hover:text-[#1F7A6E] text-[#1A2B3D]"
                             >
                                 {item}
                             </motion.a>
@@ -110,13 +95,13 @@ export default function Header() {
                         <>
                             <Link
                                 href="/dashboard"
-                                className="text-sm font-bold text-primary hover:text-accent transition-colors"
+                                className="text-sm font-black text-[#1A2B3D] hover:text-[#1F7A6E] transition-colors"
                             >
                                 Dashboard
                             </Link>
                             <button
                                 onClick={handleLogout}
-                                className="text-sm font-bold text-red-500 hover:text-red-600 transition-colors"
+                                className="text-sm font-black text-red-500 hover:text-red-600 transition-colors"
                             >
                                 Logout
                             </button>
@@ -124,7 +109,7 @@ export default function Header() {
                     ) : (
                         <Link
                             href="/login"
-                            className="text-sm font-bold text-primary hover:text-accent transition-colors"
+                            className="text-sm font-black text-[#1A2B3D] hover:text-[#1F7A6E] transition-colors"
                         >
                             Login
                         </Link>
@@ -135,7 +120,7 @@ export default function Header() {
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ duration: 0.5, delay: 0.4 }}
                         href="#positions"
-                        className="bg-primary text-white text-sm font-bold px-6 py-3 rounded-full hover:bg-black transition-all hover:-translate-y-px hover:shadow-lg"
+                        className="bg-[#0D3B34] text-white text-[11px] font-black uppercase tracking-widest px-8 py-3.5 rounded-full hover:bg-black transition-all hover:-translate-y-px hover:shadow-lg"
                     >
                         View Open Positions →
                     </motion.a>

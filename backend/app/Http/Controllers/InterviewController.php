@@ -3,6 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Interview;
+use App\Models\Applicant;
+use App\Models\User;
+use App\Mail\InterviewScheduledApplicant;
+use App\Mail\InterviewScheduledManager;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
@@ -35,6 +40,7 @@ class InterviewController extends Controller
             'scheduled_at' => 'required|date',
             'location' => 'nullable|string',
             'type' => 'required|in:phone,video,in-person',
+            'message' => 'nullable|string',
         ]);
 
         $user = $request->user();
@@ -48,6 +54,15 @@ class InterviewController extends Controller
             'type' => $request->type,
             'status' => 'scheduled',
         ]);
+
+        // Load relationships for emails
+        $interview->load(['applicant.jobPosting', 'interviewer', 'tenant']);
+
+        // Send Email to Applicant
+        Mail::to($interview->applicant->email)->send(new InterviewScheduledApplicant($interview, $request->message));
+
+        // Send Email to Manager/Interviewer
+        Mail::to($interview->interviewer->email)->send(new InterviewScheduledManager($interview, $request->message));
 
         return response()->json($interview, 201);
     }

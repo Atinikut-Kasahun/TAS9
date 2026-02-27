@@ -36,7 +36,6 @@ Route::middleware('mock.auth')->group(function () {
         Route::get('/applicants', [\App\Http\Controllers\ApplicantController::class, 'index']);
         Route::patch('/applicants/{id}/status', [\App\Http\Controllers\ApplicantController::class, 'updateStatus']);
         Route::post('/applicants/{id}/mention', [\App\Http\Controllers\ApplicantController::class, 'mention']);
-
         // Interview Management
         Route::get('/interviews', [\App\Http\Controllers\InterviewController::class, 'index']);
         Route::post('/interviews', [\App\Http\Controllers\InterviewController::class, 'store']);
@@ -81,4 +80,30 @@ Route::prefix('v1')->group(function () {
     Route::get('/public/jobs', [\App\Http\Controllers\JobPostingController::class, 'publicIndex']);
     Route::get('/public/jobs/{id}', [\App\Http\Controllers\JobPostingController::class, 'publicShow']);
     Route::post('/apply', [\App\Http\Controllers\JobApplicationController::class, 'store']);
+
+    // Public Document Access (Simplified for viewing)
+    Route::get('/applicants/{id}/resume', function ($id) {
+        $applicant = \App\Models\Applicant::findOrFail($id);
+        $path = storage_path('app/public/' . $applicant->resume_path);
+        if (!file_exists($path)) {
+            return response()->json(['error' => 'File not found'], 404);
+        }
+        return response()->file($path, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="resume.pdf"',
+        ]);
+    });
+
+    Route::get('/attachments/{id}/view', function ($id) {
+        $attachment = \App\Models\ApplicantAttachment::findOrFail($id);
+        $path = storage_path('app/public/' . $attachment->file_path);
+        if (!file_exists($path)) {
+            return response()->json(['error' => 'File not found'], 404);
+        }
+        $contentType = \Illuminate\Support\Facades\File::mimeType($path);
+        return response()->file($path, [
+            'Content-Type' => $contentType,
+            'Content-Disposition' => 'inline; filename="' . $attachment->label . '"',
+        ]);
+    });
 });

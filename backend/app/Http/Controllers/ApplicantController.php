@@ -20,10 +20,26 @@ class ApplicantController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
-        $query = Applicant::with(['jobPosting.requisition', 'attachments']);
+        $query = Applicant::with([
+            'jobPosting.requisition',
+            'attachments',
+            'interviews' => function ($q) {
+                $q->latest();
+            }
+        ]);
 
         if (!$user->hasRole('admin')) {
             $query->where('tenant_id', $user->tenant_id);
+        }
+
+        if ($request->has('search') && $request->search) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'LIKE', "%{$search}%")
+                    ->orWhere('email', 'LIKE', "%{$search}%")
+                    ->orWhere('phone', 'LIKE', "%{$search}%")
+                    ->orWhere('professional_background', 'LIKE', "%{$search}%");
+            });
         }
 
         if ($request->has('job_posting_id')) {

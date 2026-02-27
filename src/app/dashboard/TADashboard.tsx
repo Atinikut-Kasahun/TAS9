@@ -12,6 +12,7 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
     const [currentPage, setCurrentPage] = useState(1);
     const [loading, setLoading] = useState(false);
     const [stats, setStats] = useState<any>(null);
+    const [search, setSearch] = useState(''); // live search term from URL
     const [subTab, setSubTab] = useState('NEW'); // Represents the local view/stage
     const [drawerReq, setDrawerReq] = useState<any>(null);
     const [drawerApp, setDrawerApp] = useState<any>(null);
@@ -22,6 +23,11 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
     const [rejectionNote, setRejectionNote] = useState('');
     const [reportFilters, setReportFilters] = useState({ dateRange: '30', department: 'All', jobId: 'All' });
     const [fetchError, setFetchError] = useState<string | null>(null);
+    const [interviewsList, setInterviewsList] = useState<any[]>([]);
+
+    // Interview Scheduling Modal State
+    const [scheduleModal, setScheduleModal] = useState(false);
+    const [scheduleForm, setScheduleForm] = useState({ date: '', time: '', type: 'video', location: '', interviewer_id: '', message: '' });
 
     // Notifications & Mentions
     const [mentionUser, setMentionUser] = useState('');
@@ -35,6 +41,16 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
             apiFetch('/v1/users').then(data => setDepartmentUsers(data || []));
         }
     }, [drawerApp]);
+
+    // Poll URL for live search changes written by Navbar
+    useEffect(() => {
+        const interval = setInterval(() => {
+            const params = new URLSearchParams(window.location.search);
+            const s = params.get('search') ?? '';
+            setSearch(prev => (prev !== s ? s : prev));
+        }, 200);
+        return () => clearInterval(interval);
+    }, []);
 
     const handleSendMention = async () => {
         if (!mentionUser || !mentionNote.trim()) return;
@@ -90,27 +106,35 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
 
             const currentStatus = tabToStatusMap[subTab] ?? 'ALL';
 
-            const [jobsData, reqsResponse, appsResponse] = await Promise.all([
-                apiFetch('/v1/jobs'),
-                apiFetch('/v1/requisitions'),
-                apiFetch(`/v1/applicants?page=${page}&status=${currentStatus}`),
-            ]);
-            setJobs(jobsData || []);
-            setRequisitions(reqsResponse?.data || []);
-
-            if (appsResponse?.data) {
-                setApplicants(appsResponse.data);
-                setApplicantsPagination({
-                    total: appsResponse.total,
-                    current_page: appsResponse.current_page,
-                    last_page: appsResponse.last_page,
-                    from: appsResponse.from,
-                    to: appsResponse.to
-                });
-                setCurrentPage(appsResponse.current_page);
-            } else {
-                setApplicants(appsResponse || []);
+            if (initialTab === 'Calendar') {
+                const interviewsData = await apiFetch(`/v1/interviews?status=scheduled`);
+                setInterviewsList(interviewsData || []);
+                setApplicants([]); // Clear applicants
                 setApplicantsPagination(null);
+            } else {
+                const searchParam = search ? `&search=${encodeURIComponent(search)}` : '';
+                const [jobsData, reqsResponse, appsResponse] = await Promise.all([
+                    apiFetch(`/v1/jobs${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+                    apiFetch('/v1/requisitions'),
+                    apiFetch(`/v1/applicants?page=${page}&status=${currentStatus}${searchParam}`),
+                ]);
+                setJobs(jobsData || []);
+                setRequisitions(reqsResponse?.data || []);
+
+                if (appsResponse?.data) {
+                    setApplicants(appsResponse.data);
+                    setApplicantsPagination({
+                        total: appsResponse.total,
+                        current_page: appsResponse.current_page,
+                        last_page: appsResponse.last_page,
+                        from: appsResponse.from,
+                        to: appsResponse.to
+                    });
+                    setCurrentPage(appsResponse.current_page);
+                } else {
+                    setApplicants(appsResponse || []);
+                    setApplicantsPagination(null);
+                }
             }
         } catch (err: any) {
             console.error('Failed to fetch dashboard data', err);
@@ -122,7 +146,7 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
 
     useEffect(() => {
         fetchData(1);
-    }, [subTab, initialTab]); // Refresh when either the global or local context changes
+    }, [subTab, initialTab, search]); // Re-fetch when tab, globalTab, or search changes
 
     useEffect(() => {
         // Default sub-tab when global category changes
@@ -131,6 +155,7 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
         else if (initialTab === 'Employees') setSubTab('HIRED');
         else if (initialTab === 'HiringPlan') setSubTab('REQUISITIONS');
         else if (initialTab === 'Reports') setSubTab('OVERVIEW');
+        else if (initialTab === 'Calendar') setSubTab('UPCOMING');
     }, [initialTab]);
 
 
@@ -166,6 +191,44 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                 body: JSON.stringify({ status: newStatus }),
             });
             setDrawerApp(null);
+            fetchData(currentPage);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const handleScheduleInterview = async () => {
+        if (!scheduleForm.date || !scheduleForm.time || !scheduleForm.interviewer_id) return;
+        setActionLoading(true);
+        try {
+            // Combine date and time to ISO format (assume local timezone)
+            const scheduledAt = new Date(`${scheduleForm.date}T${scheduleForm.time}`).toISOString();
+
+            await apiFetch('/v1/interviews', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    applicant_id: drawerApp.id,
+                    interviewer_id: scheduleForm.interviewer_id,
+                    scheduled_at: scheduledAt,
+                    type: scheduleForm.type,
+                    location: scheduleForm.location,
+                    message: scheduleForm.message
+                }),
+            });
+
+            // Also update applicant status to interview
+            await apiFetch(`/v1/applicants/${drawerApp.id}/status`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: 'interview' }),
+            });
+
+            setDrawerApp((prev: any) => ({ ...prev, status: 'interview' }));
+            setScheduleModal(false);
+            setScheduleForm({ date: '', time: '', type: 'video', location: '', interviewer_id: '', message: '' });
             fetchData(currentPage);
         } catch (e) {
             console.error(e);
@@ -250,7 +313,38 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* Search Active Banner */}
+            <AnimatePresence>
+                {search && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="mx-10 mt-2 p-3 bg-[#1F7A6E]/10 border border-[#1F7A6E]/20 rounded-2xl flex items-center gap-4"
+                    >
+                        <svg className="w-4 h-4 text-[#1F7A6E] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        <p className="text-xs font-bold text-[#1F7A6E] flex-1">
+                            Showing results for: <span className="font-black text-[#1A2B3D]">"{search}"</span>
+                        </p>
+                        <button
+                            onClick={() => {
+                                const url = new URL(window.location.href);
+                                url.searchParams.delete('search');
+                                window.history.replaceState({}, '', url);
+                                setSearch('');
+                            }}
+                            className="text-[10px] font-black text-[#1F7A6E] uppercase tracking-widest hover:text-[#165C53] transition-colors"
+                        >
+                            Clear ✕
+                        </button>
+                    </motion.div>
+                )}
+            </AnimatePresence>
             {/* Page Header */}
+
             <div className="flex justify-between items-end mb-4">
                 <div className="space-y-4">
                     {/* Breadcrumb trail */}
@@ -416,9 +510,12 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                                         <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center overflow-hidden border border-gray-100 group-hover:border-[#1F7A6E] transition-all">
                                                             {app.photo_path ? (
                                                                 <img
-                                                                    src={`${API_URL.replace('/api', '/storage')}/${app.photo_path}`}
+                                                                    src={app.photo_path.startsWith('http') ? app.photo_path : `${API_URL.replace('/api', '/storage')}/${app.photo_path}`}
                                                                     alt=""
                                                                     className="w-full h-full object-cover"
+                                                                    onError={(e) => {
+                                                                        (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(app.name)}&background=random`;
+                                                                    }}
                                                                 />
                                                             ) : (
                                                                 <span className="text-xs font-black text-gray-400">{app.name.charAt(0)}</span>
@@ -446,14 +543,23 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                                     <p className="text-[10px] font-black text-[#1F7A6E] mt-1 uppercase">{app.match_score || 75}% Match</p>
                                                 </td>
                                                 <td className="px-8 py-6">
-                                                    <span className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest ${app.status === 'hired' ? 'bg-emerald-50 text-emerald-600' :
-                                                        app.status === 'rejected' ? 'bg-red-50 text-red-600' :
-                                                            app.status === 'interview' ? 'bg-purple-50 text-purple-600' :
-                                                                app.status === 'offer' ? 'bg-amber-50 text-amber-600' :
-                                                                    'bg-blue-50 text-blue-600'
-                                                        }`}>
-                                                        {app.status}
-                                                    </span>
+                                                    {app.status === 'interview' && app.interviews && app.interviews.length > 0 ? (
+                                                        <span className="px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest bg-purple-50 text-purple-600">
+                                                            Scheduled: {(() => {
+                                                                const d = new Date(app.interviews[0].scheduled_at);
+                                                                return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+                                                            })()}
+                                                        </span>
+                                                    ) : (
+                                                        <span className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest ${app.status === 'hired' ? 'bg-emerald-50 text-emerald-600' :
+                                                            app.status === 'rejected' ? 'bg-red-50 text-red-600' :
+                                                                app.status === 'interview' ? 'bg-purple-50 text-purple-600' :
+                                                                    app.status === 'offer' ? 'bg-amber-50 text-amber-600' :
+                                                                        'bg-blue-50 text-blue-600'
+                                                            }`}>
+                                                            {app.status}
+                                                        </span>
+                                                    )}
                                                 </td>
                                                 <td className="px-8 py-6">
                                                     {app.created_at ? (() => {
@@ -660,6 +766,84 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                     ))}
                                 </tbody>
                             </table>
+                        )
+                    }
+
+                    {
+                        initialTab === 'Calendar' && (
+                            <div className="flex flex-col">
+                                <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-white">
+                                    <div className="space-y-1">
+                                        <h2 className="text-2xl font-black text-[#1A2B3D] flex items-center gap-3">
+                                            <div className="w-2 h-8 bg-[#1F7A6E] rounded-full" />
+                                            INTERVIEW CALENDAR
+                                        </h2>
+                                        <p className="text-xs font-medium text-gray-400">Manage and view all upcoming scheduled interviews</p>
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                        <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 px-4 py-2 rounded-full border border-gray-100">
+                                            Upcoming: <span className="text-[#1A2B3D]">{interviewsList.length}</span>
+                                        </p>
+                                    </div>
+                                </div>
+                                <table className="w-full text-left">
+                                    <thead className="bg-[#F9FAFB] border-b border-gray-100">
+                                        <tr>
+                                            {['CANDIDATE', 'CONTACT', 'INTERVIEW DATE & TIME', 'TYPE', 'STATUS'].map(h => (
+                                                <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-50">
+                                        {interviewsList.length === 0 ? (
+                                            <tr><td colSpan={5} className="px-8 py-20 text-center text-gray-400 italic text-sm">No scheduled interviews found.</td></tr>
+                                        ) : interviewsList.map((interview: any) => (
+                                            <tr key={interview.id} className="hover:bg-gray-50 transition-colors group cursor-pointer" onClick={() => {
+                                                if (interview.applicant) setDrawerApp(interview.applicant);
+                                            }}>
+                                                <td className="px-8 py-6">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600 font-black">
+                                                            {interview.applicant?.name?.charAt(0) || 'C'}
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-black text-[13px] text-[#1A2B3D]">{interview.applicant?.name || 'Unknown'}</p>
+                                                            <p className="text-[11px] text-gray-400 mt-0.5">{interview.applicant?.job_posting?.title || 'Open Role'}</p>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-8 py-6">
+                                                    <p className="text-[12px] font-medium text-gray-600">{interview.applicant?.email || 'N/A'}</p>
+                                                    <p className="text-[11px] text-gray-400">{interview.applicant?.phone || '-'}</p>
+                                                </td>
+                                                <td className="px-8 py-6">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-[#1F7A6E] group-hover:text-white transition-colors">
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-bold text-[#1A2B3D] text-[13px]">
+                                                                {new Date(interview.scheduled_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                                            </p>
+                                                            <p className="text-[#1F7A6E] font-black text-[11px]">
+                                                                {new Date(interview.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-8 py-6 text-[13px] text-gray-600 capitalize font-medium">
+                                                    {interview.type}
+                                                </td>
+                                                <td className="px-8 py-6">
+                                                    <span className="px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 border border-emerald-100 shadow-sm">
+                                                        Confirmed
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         )
                     }
                     {
@@ -1045,7 +1229,7 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                         <div className="w-32 h-32 rounded-[36px] bg-white p-1 shadow-2xl overflow-hidden border-4 border-white/10 shrink-0">
                                             {drawerApp.photo_path ? (
                                                 <img
-                                                    src={`${API_URL.replace('/api', '/storage')}/${drawerApp.photo_path}`}
+                                                    src={drawerApp.photo_path.startsWith('http') ? drawerApp.photo_path : `${API_URL.replace('/api', '/storage')}/${drawerApp.photo_path}`}
                                                     alt={drawerApp.name}
                                                     className="w-full h-full object-cover rounded-[30px]"
                                                 />
@@ -1129,7 +1313,7 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                                         className="p-5 bg-[#1F7A6E]/5 rounded-2xl border border-[#1F7A6E]/10 flex items-center gap-4 hover:bg-[#1F7A6E]/10 transition-all group"
                                                     >
                                                         <div className="w-10 h-10 rounded-xl bg-[#1F7A6E] flex items-center justify-center text-white shadow-lg shadow-[#1F7A6E]/20">
-                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
+                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 019-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
                                                         </div>
                                                         <div className="flex-1">
                                                             <p className="text-[10px] font-black text-[#1F7A6E] uppercase leading-none mb-1">Portfolio</p>
@@ -1145,11 +1329,10 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                         </section>
                                     </div>
 
-                                    {/* Professional Abstract */}
                                     <section className="space-y-4">
                                         <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
                                             <div className="w-1.5 h-1.5 rounded-full bg-[#1F7A6E]" />
-                                            Profile Abstract
+                                            Professional Background
                                         </h3>
                                         <div className="p-8 bg-gray-50/50 rounded-[32px] border border-gray-100 italic text-[#1A2B3D] leading-relaxed relative overflow-hidden group hover:bg-white hover:shadow-xl transition-all">
                                             <div className="absolute top-0 left-0 w-1.5 h-full bg-[#1F7A6E]" />
@@ -1176,7 +1359,7 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                                     </div>
                                                 </div>
                                                 <a
-                                                    href={`${API_URL.replace('/api', '/storage')}/${drawerApp.resume_path}`}
+                                                    href={`${API_URL}/v1/applicants/${drawerApp.id}/resume`}
                                                     target="_blank"
                                                     className="px-8 py-3 bg-white border-2 border-gray-100 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-[#1A2B3D] hover:text-white hover:border-[#1A2B3D] transition-all shadow-sm"
                                                 >
@@ -1196,7 +1379,7 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                                         </div>
                                                     </div>
                                                     <a
-                                                        href={`${API_URL.replace('/api', '/storage')}/${file.file_path}`}
+                                                        href={`${API_URL}/v1/attachments/${file.id}/view`}
                                                         target="_blank"
                                                         className="px-8 py-3 bg-white border-2 border-gray-100 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-[#1A2B3D] hover:text-white hover:border-[#1A2B3D] transition-all shadow-sm"
                                                     >
@@ -1272,14 +1455,20 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                             <div className="p-8 border-t border-gray-100 bg-[#F9FAFB]/80 backdrop-blur-xl flex gap-5">
                                 {drawerApp.status !== 'hired' && drawerApp.status !== 'rejected' && (
                                     <>
-                                        {/* NEW / APPLIED → Move to Interview */}
+                                        {/* NEW / APPLIED → Move to Interview (Now opens Schedule Modal) */}
                                         {(drawerApp.status === 'applied' || drawerApp.status === 'new' || drawerApp.status === 'phone_screen') && (
                                             <button
-                                                onClick={() => handleStatusUpdate(drawerApp.id, 'interview')}
+                                                onClick={() => {
+                                                    // Auto-select first department user as default interviewer
+                                                    if (departmentUsers.length > 0) {
+                                                        setScheduleForm(p => ({ ...p, interviewer_id: departmentUsers[0].id }));
+                                                    }
+                                                    setScheduleModal(true);
+                                                }}
                                                 disabled={actionLoading}
                                                 className="flex-1 py-5 bg-gradient-to-r from-[#1F7A6E] to-[#165C53] text-white rounded-[24px] font-black text-[11px] uppercase tracking-[0.2em] shadow-xl shadow-[#1F7A6E]/30 hover:shadow-2xl hover:-translate-y-0.5 transition-all"
                                             >
-                                                {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto" /> : '📅 Move to Interview'}
+                                                {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto" /> : '📅 Schedule Interview'}
                                             </button>
                                         )}
 
@@ -1407,6 +1596,131 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                     className="flex-1 py-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-lg shadow-amber-500/30 hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto" /> : '✉️ Send Offer Letter'}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Schedule Interview Modal */}
+            <AnimatePresence>
+                {scheduleModal && drawerApp && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[200] flex items-center justify-center p-6"
+                        style={{ background: 'rgba(26,43,61,0.6)', backdropFilter: 'blur(8px)' }}
+                        onClick={() => setScheduleModal(false)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.92, y: 20 }}
+                            animate={{ scale: 1, y: 0 }}
+                            exit={{ scale: 0.92, y: 20 }}
+                            onClick={e => e.stopPropagation()}
+                            className="bg-white rounded-[32px] shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"
+                        >
+                            {/* Modal Header */}
+                            <div className="bg-gradient-to-r from-[#1F7A6E] to-[#165C53] p-8 shrink-0">
+                                <p className="text-[10px] font-black text-white/70 uppercase tracking-widest mb-1">Schedule Stage</p>
+                                <h3 className="text-2xl font-black text-white">Schedule Interview</h3>
+                                <p className="text-sm text-white/80 mt-1">with {drawerApp.name} · {drawerApp.job_posting?.title || 'Open Role'}</p>
+                            </div>
+
+                            {/* Modal Body (Scrollable if needed) */}
+                            <div className="p-8 space-y-6 overflow-y-auto flex-1">
+                                <div className="grid grid-cols-2 gap-6">
+                                    <div>
+                                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Date <span className="text-red-400">*</span></label>
+                                        <input
+                                            type="date"
+                                            value={scheduleForm.date}
+                                            onChange={e => setScheduleForm(p => ({ ...p, date: e.target.value }))}
+                                            className="w-full px-4 py-3.5 rounded-2xl border-2 border-gray-100 focus:border-[#1F7A6E] focus:outline-none text-[#1A2B3D] font-bold text-sm transition-colors"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Time <span className="text-red-400">*</span></label>
+                                        <input
+                                            type="time"
+                                            value={scheduleForm.time}
+                                            onChange={e => setScheduleForm(p => ({ ...p, time: e.target.value }))}
+                                            className="w-full px-4 py-3.5 rounded-2xl border-2 border-gray-100 focus:border-[#1F7A6E] focus:outline-none text-[#1A2B3D] font-bold text-sm transition-colors"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-6">
+                                    <div>
+                                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Format <span className="text-red-400">*</span></label>
+                                        <select
+                                            value={scheduleForm.type}
+                                            onChange={e => setScheduleForm(p => ({ ...p, type: e.target.value }))}
+                                            className="w-full px-4 py-3.5 rounded-2xl border-2 border-gray-100 focus:border-[#1F7A6E] focus:outline-none text-[#1A2B3D] font-bold text-sm transition-colors"
+                                        >
+                                            <option value="video">Video Call</option>
+                                            <option value="phone">Phone Screen</option>
+                                            <option value="in-person">In-Person</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Location / Link</label>
+                                        <input
+                                            type="text"
+                                            placeholder="e.g. Google Meet link or HQ Address"
+                                            value={scheduleForm.location}
+                                            onChange={e => setScheduleForm(p => ({ ...p, location: e.target.value }))}
+                                            className="w-full px-4 py-3.5 rounded-2xl border-2 border-gray-100 focus:border-[#1F7A6E] focus:outline-none text-[#1A2B3D] font-bold text-sm transition-colors"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Interviewer <span className="text-red-400">*</span></label>
+                                    <select
+                                        value={scheduleForm.interviewer_id}
+                                        onChange={e => setScheduleForm(p => ({ ...p, interviewer_id: e.target.value }))}
+                                        className="w-full px-4 py-3.5 rounded-2xl border-2 border-gray-100 focus:border-[#1F7A6E] focus:outline-none text-[#1A2B3D] font-bold text-sm transition-colors"
+                                    >
+                                        <option value="" disabled>Select Interviewer</option>
+                                        {departmentUsers.map(u => (
+                                            <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Custom Message to Candidate</label>
+                                    <textarea
+                                        rows={4}
+                                        placeholder="Add instructions, details about the format, what to prepare, etc."
+                                        value={scheduleForm.message}
+                                        onChange={e => setScheduleForm(p => ({ ...p, message: e.target.value }))}
+                                        className="w-full px-4 py-3.5 rounded-2xl border-2 border-gray-100 focus:border-[#1F7A6E] focus:outline-none text-[#1A2B3D] font-bold text-sm transition-colors resize-none"
+                                    />
+                                </div>
+
+                                <div className="bg-[#1F7A6E]/5 border border-[#1F7A6E]/20 rounded-2xl p-4 text-[12px] text-[#1F7A6E] font-medium flex gap-3">
+                                    <span className="text-base text-xl leading-none">📧</span>
+                                    <p>An official interview invitation will be emailed to <strong>{drawerApp.email}</strong> and the selected interviewer immediately. They will also receive a 24-hour reminder before the scheduled time.</p>
+                                </div>
+                            </div>
+
+                            {/* Modal Actions */}
+                            <div className="px-8 pb-8 shrink-0 flex gap-4 pt-4 bg-white border-t border-gray-50">
+                                <button
+                                    onClick={() => setScheduleModal(false)}
+                                    className="flex-1 py-4 bg-gray-100 text-gray-500 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-gray-200 transition-all"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleScheduleInterview}
+                                    disabled={actionLoading || !scheduleForm.date || !scheduleForm.time || !scheduleForm.interviewer_id}
+                                    className="flex-[2] py-4 bg-gradient-to-r from-[#1F7A6E] to-[#165C53] text-white rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-lg shadow-[#1F7A6E]/30 hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {actionLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto" /> : '📅 Schedule & Send Invites'}
                                 </button>
                             </div>
                         </motion.div>

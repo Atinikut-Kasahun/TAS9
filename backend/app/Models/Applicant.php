@@ -43,6 +43,11 @@ class Applicant extends Model
         return $this->belongsTo(Tenant::class);
     }
 
+    public function interviews()
+    {
+        return $this->hasMany(Interview::class);
+    }
+
     public function jobPosting(): BelongsTo
     {
         return $this->belongsTo(JobPosting::class);

@@ -63,7 +63,9 @@ function DashboardContent() {
 
             <div className="max-w-[1400px] mx-auto pt-10 px-8">
                 {/* Dashboard Switch based on Role & Current Tab */}
-                {roleSlug === 'hiring_manager' ? (
+                {activeTab === 'Calendar' ? (
+                    <TADashboard user={user} activeTab={activeTab} onLogout={handleLogout} />
+                ) : roleSlug === 'hiring_manager' ? (
                     <DeptManagerDashboard user={user} activeTab={activeTab} onLogout={handleLogout} />
                 ) : roleSlug === 'hr_manager' ? (
                     <HRManagerDashboard user={user} activeTab={activeTab} onLogout={handleLogout} />

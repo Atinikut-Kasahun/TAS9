@@ -21,6 +21,18 @@ class JobPostingController extends Controller
             $query->where('tenant_id', $user->tenant_id);
         }
 
+        if ($request->has('search') && $request->search) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'LIKE', "%{$search}%")
+                    ->orWhere('location', 'LIKE', "%{$search}%")
+                    ->orWhere('department', 'LIKE', "%{$search}%")
+                    ->orWhereHas('requisition', function ($sq) use ($search) {
+                        $sq->where('department', 'LIKE', "%{$search}%");
+                    });
+            });
+        }
+
         return response()->json($query->orderBy('created_at', 'desc')->get());
     }
 
