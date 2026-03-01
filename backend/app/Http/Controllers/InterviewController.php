@@ -101,4 +101,22 @@ class InterviewController extends Controller
 
         return response()->json($interview);
     }
+
+    /**
+     * Global Admin: all interviews across all companies.
+     */
+    public function indexGlobal(Request $request): JsonResponse
+    {
+        $query = Interview::with(['applicant.jobPosting', 'interviewer', 'tenant']);
+
+        if ($request->has('tenant_id') && $request->tenant_id) {
+            $query->where('tenant_id', $request->tenant_id);
+        }
+
+        if ($request->has('status') && $request->status) {
+            $query->where('status', $request->status);
+        }
+
+        return response()->json($query->orderBy('scheduled_at', 'asc')->get());
+    }
 }

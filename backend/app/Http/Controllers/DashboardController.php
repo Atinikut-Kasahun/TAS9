@@ -29,23 +29,62 @@ class DashboardController extends Controller
 
     private function adminDashboard(): JsonResponse
     {
+        $today = \Carbon\Carbon::today();
+        $yesterday = \Carbon\Carbon::yesterday();
+        $thirtyDaysAgo = now()->subDays(30);
+
+        // Core Counts
+        $activeJobsCount = \App\Models\JobPosting::where('status', 'active')->count();
+        $candidatesCount = \App\Models\Applicant::count();
+        $employeesCount = \App\Models\User::count();
+        $newTodayCount = \App\Models\Applicant::whereDate('created_at', $today)->count();
+        $activeEventsCount = \App\Models\Event::where('event_date', '>=', now())->count();
+
+        // Trend Calculations
+        $jobsPastCount = \App\Models\JobPosting::where('status', 'active')->where('created_at', '<', $thirtyDaysAgo)->count();
+        $jobsTrend = $jobsPastCount > 0 ? round((($activeJobsCount - $jobsPastCount) / $jobsPastCount) * 100, 1) : ($activeJobsCount > 0 ? 100 : 0);
+
+        $candidatesPastCount = \App\Models\Applicant::where('created_at', '<', $thirtyDaysAgo)->count();
+        $candidatesTrend = $candidatesPastCount > 0 ? round((($candidatesCount - $candidatesPastCount) / $candidatesPastCount) * 100, 1) : ($candidatesCount > 0 ? 100 : 0);
+
+        $newYesterdayCount = \App\Models\Applicant::whereDate('created_at', $yesterday)->count();
+        $newTodayTrend = $newYesterdayCount > 0 ? round((($newTodayCount - $newYesterdayCount) / $newYesterdayCount) * 100, 1) : ($newTodayCount > 0 ? 100 : 0);
+
+        $eventsPastCount = \App\Models\Event::where('event_date', '>=', now()->subDays(7))->where('created_at', '<', now()->subDays(7))->count();
+        $eventsTrend = $eventsPastCount > 0 ? round((($activeEventsCount - $eventsPastCount) / $eventsPastCount) * 100, 1) : ($activeEventsCount > 0 ? 100 : 0);
+
         $stats = [
             'total_tenants' => \App\Models\Tenant::count(),
-            'total_active_jobs' => \App\Models\JobPosting::where('status', 'active')->count(),
-            'total_candidates' => \App\Models\Applicant::count(),
-            'total_employees' => \App\Models\User::count(),
-            'new_applications_today' => \App\Models\Applicant::whereDate('created_at', \Carbon\Carbon::today())->count(),
-            'active_events' => \App\Models\Event::where('status', 'upcoming')
-                ->orWhere('status', 'ongoing')
-                ->count(),
+            'total_active_jobs' => $activeJobsCount,
+            'total_active_jobs_trend' => $jobsTrend,
+            'total_active_jobs_label' => 'vs last month',
+            'total_candidates' => $candidatesCount,
+            'total_candidates_trend' => $candidatesTrend,
+            'total_candidates_label' => 'vs last month',
+            'total_employees' => $employeesCount,
+            'new_applications_today' => $newTodayCount,
+            'new_applications_today_trend' => $newTodayTrend,
+            'new_applications_today_label' => 'vs yesterday',
+            'active_events' => $activeEventsCount,
+            'active_events_trend' => $eventsTrend,
+            'active_events_label' => 'vs last week',
             'tenants_breakdown' => \App\Models\Tenant::withCount([
                 'jobPostings as active_jobs_count' => function ($query) {
                     $query->where('status', 'active');
                 },
                 'jobPostings',
                 'jobRequisitions',
-                'users'
-            ])->get(),
+                'users',
+                'applicants',
+                'applicants as hired_count' => function ($query) {
+                    $query->where('status', 'hired');
+                }
+            ])->get()->map(function ($tenant) {
+                $tenant->conversion_rate = $tenant->applicants_count > 0
+                    ? round(($tenant->hired_count / $tenant->applicants_count) * 100, 1)
+                    : 0;
+                return $tenant;
+            }),
             'recent_global_applicants' => \App\Models\Applicant::with('tenant', 'jobPosting')
                 ->orderBy('created_at', 'desc')
                 ->limit(5)
@@ -57,18 +96,42 @@ class DashboardController extends Controller
 
     private function taManagerDashboard($tenantId): JsonResponse
     {
+        $hiredApps = \App\Models\Applicant::where('tenant_id', $tenantId)->where('status', 'hired')->get();
+        $avgTime = $hiredApps->count() > 0 ? round($hiredApps->map(function ($app) {
+            return $app->created_at->diffInDays($app->updated_at);
+        })->average()) : 0;
+
+        $sources = \App\Models\Applicant::where('tenant_id', $tenantId)
+            ->select('source', DB::raw('count(*) as count'))
+            ->groupBy('source')
+            ->orderByDesc('count')
+            ->get();
+
         $stats = [
-            'active_jobs' => JobPosting::where('tenant_id', $tenantId)->where('status', 'active')->count(),
+            'total_active_jobs' => JobPosting::where('tenant_id', $tenantId)->where('status', 'active')->count(),
+            'total_candidates' => \App\Models\Applicant::where('tenant_id', $tenantId)->count(),
+            'total_employees' => \App\Models\User::where('tenant_id', $tenantId)->count(),
+            'new_applications_today' => \App\Models\Applicant::where('tenant_id', $tenantId)->whereDate('created_at', \Carbon\Carbon::today())->count(),
             'pending_requisitions' => JobRequisition::where('tenant_id', $tenantId)->where('status', 'pending')->count(),
-            'new_applicants' => Applicant::where('tenant_id', $tenantId)->where('status', 'new')->count(),
-            'applicants_by_status' => Applicant::where('tenant_id', $tenantId)
-                ->select('status', DB::raw('count(*) as count'))
-                ->groupBy('status')
-                ->get(),
-            'recent_requisitions' => JobRequisition::where('tenant_id', $tenantId)
+            'recent_applicants' => \App\Models\Applicant::with('jobPosting')
+                ->where('tenant_id', $tenantId)
                 ->orderBy('created_at', 'desc')
                 ->limit(5)
                 ->get(),
+            'funnel' => [
+                'applied' => \App\Models\Applicant::where('tenant_id', $tenantId)->count(),
+                'interview' => \App\Models\Applicant::where('tenant_id', $tenantId)->where('status', 'interview')->count(),
+                'offer' => \App\Models\Applicant::where('tenant_id', $tenantId)->where('status', 'offer')->count(),
+                'hired' => \App\Models\Applicant::where('tenant_id', $tenantId)->where('status', 'hired')->count(),
+                'rejected' => \App\Models\Applicant::where('tenant_id', $tenantId)->where('status', 'rejected')->count(),
+            ],
+            'requisitions' => [
+                'pending' => JobRequisition::where('tenant_id', $tenantId)->where('status', 'pending')->count(),
+            ],
+            'velocity' => [
+                'average_time_to_hire_days' => $avgTime,
+            ],
+            'sources' => $sources,
         ];
 
         return response()->json($stats);
@@ -87,5 +150,55 @@ class DashboardController extends Controller
         ];
 
         return response()->json($stats);
+    }
+
+    /**
+     * Global Admin: aggregated reports with Time-to-Hire per company.
+     */
+    public function reportsData(): JsonResponse
+    {
+        $tenants = \App\Models\Tenant::withCount([
+            'jobPostings as active_jobs_count' => function ($q) {
+                $q->where('status', 'active');
+            },
+            'jobPostings as total_jobs_count',
+            'applicants',
+            'applicants as hired_count' => function ($q) {
+                $q->where('status', 'hired');
+            },
+            'applicants as shortlisted_count' => function ($q) {
+                $q->where('status', 'shortlisted');
+            },
+            'applicants as interview_count' => function ($q) {
+                $q->where('status', 'interview');
+            },
+        ])->get()->map(function ($tenant) {
+            // Time-to-Hire: avg days from application to 'hired'
+            $avgDaysToHire = \App\Models\Applicant::where('tenant_id', $tenant->id)
+                ->where('status', 'hired')
+                ->whereNotNull('hired_at')
+                ->selectRaw('AVG(DATEDIFF(hired_at, created_at)) as avg_days')
+                ->value('avg_days');
+
+            $tenant->avg_days_to_hire = $avgDaysToHire ? round($avgDaysToHire, 1) : null;
+            $tenant->conversion_rate = $tenant->applicants_count > 0
+                ? round(($tenant->hired_count / $tenant->applicants_count) * 100, 1)
+                : 0;
+
+            return $tenant;
+        })->sortByDesc('hired_count')->values();
+
+        $globalStats = [
+            'total_applied' => \App\Models\Applicant::count(),
+            'total_shortlisted' => \App\Models\Applicant::where('status', 'shortlisted')->count(),
+            'total_interview' => \App\Models\Applicant::where('status', 'interview')->count(),
+            'total_hired' => \App\Models\Applicant::where('status', 'hired')->count(),
+            'total_rejected' => \App\Models\Applicant::where('status', 'rejected')->count(),
+        ];
+
+        return response()->json([
+            'tenants' => $tenants,
+            'global_funnel' => $globalStats,
+        ]);
     }
 }

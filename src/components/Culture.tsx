@@ -25,13 +25,16 @@ export default function Culture({ settings }: { settings?: any }) {
 
     useEffect(() => {
         if (settings?.site_culture_text) {
-            try { setCultureText(JSON.parse(settings.site_culture_text)); } catch (e) { }
+            const cText = settings.site_culture_text;
+            setCultureText(typeof cText === 'string' ? JSON.parse(cText) : cText);
         }
         if (settings?.site_culture_images) {
-            try { setCultureImages(JSON.parse(settings.site_culture_images)); } catch (e) { }
+            const cImages = settings.site_culture_images;
+            setCultureImages(typeof cImages === 'string' ? JSON.parse(cImages) : cImages);
         }
         if (settings?.site_team_diversity) {
-            try { setTeamDiversity(JSON.parse(settings.site_team_diversity)); } catch (e) { }
+            const diversity = settings.site_team_diversity;
+            setTeamDiversity(typeof diversity === 'string' ? JSON.parse(diversity) : diversity);
         }
     }, [settings]);
 
@@ -42,7 +45,7 @@ export default function Culture({ settings }: { settings?: any }) {
     };
 
     return (
-        <section className="py-24 bg-cream/50" id="about-us">
+        <section className="py-24 bg-[#FDF9F3]" id="about-us">
             <div className="max-w-7xl mx-auto px-8 grid grid-cols-2 gap-24 items-center">
                 {/* Left Text */}
                 <motion.div
@@ -51,8 +54,8 @@ export default function Culture({ settings }: { settings?: any }) {
                     viewport={{ once: false, amount: 0.3 }}
                     transition={{ duration: 0.8, ease: "easeOut" }}
                 >
-                    <span className="text-accent font-bold text-xs uppercase tracking-widest mb-6 block">Our DNA</span>
-                    <h2 className="text-5xl font-bold text-primary mb-6">
+                    <span className="text-[#00453B] font-bold text-xs uppercase tracking-widest mb-6 block">Our DNA</span>
+                    <h2 className="text-5xl font-bold text-[#00453B] mb-6">
                         {cultureText.heading}
                     </h2>
                     <div className="space-y-8">
@@ -66,10 +69,10 @@ export default function Culture({ settings }: { settings?: any }) {
                                 className="group"
                             >
                                 <div className="flex items-start gap-5">
-                                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-accent/10 flex items-center justify-center text-accent text-xs font-bold mt-1 group-hover:bg-accent group-hover:text-white transition-colors">•</span>
+                                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#00453B]/10 flex items-center justify-center text-[#00453B] text-xs font-bold mt-1 group-hover:bg-[#00453B] group-hover:text-white transition-colors">•</span>
                                     <div>
-                                        <p className="text-primary text-xl font-bold mb-1">{point.heading || point.text}</p>
-                                        <p className="text-primary/50 text-sm font-medium">{point.text || point.detail}</p>
+                                        <p className="text-[#00453B] text-xl font-bold mb-1">{point.heading || point.text}</p>
+                                        <p className="text-[#00453B]/50 text-sm font-medium">{point.text || point.detail}</p>
                                     </div>
                                 </div>
                             </motion.div>
@@ -83,12 +86,12 @@ export default function Culture({ settings }: { settings?: any }) {
                     whileInView={{ opacity: 1, x: 0 }}
                     viewport={{ once: false, amount: 0.2 }}
                     transition={{ duration: 0.7 }}
-                    className="grid grid-cols-2 grid-rows-2 gap-4 h-[480px]"
+                    className="grid grid-cols-2 gap-4"
                 >
                     {/* Image 1 */}
                     <motion.div
                         whileHover={{ scale: 1.02 }}
-                        className="rounded-2xl overflow-hidden"
+                        className="rounded-2xl overflow-hidden aspect-[4/3]"
                         style={{
                             backgroundImage: `url('${getImageUrl(cultureImages.img1, "https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=600&q=80")}')`,
                             backgroundSize: "cover",
@@ -98,7 +101,7 @@ export default function Culture({ settings }: { settings?: any }) {
                     {/* Image 2 */}
                     <motion.div
                         whileHover={{ scale: 1.02 }}
-                        className="rounded-2xl overflow-hidden"
+                        className="rounded-2xl overflow-hidden aspect-[4/3]"
                         style={{
                             backgroundImage: `url('${getImageUrl(cultureImages.img2, "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=600&q=80")}')`,
                             backgroundSize: "cover",
@@ -108,7 +111,7 @@ export default function Culture({ settings }: { settings?: any }) {
                     {/* Image 3 */}
                     <motion.div
                         whileHover={{ scale: 1.02 }}
-                        className="rounded-2xl overflow-hidden"
+                        className="rounded-2xl overflow-hidden aspect-[4/3]"
                         style={{
                             backgroundImage: `url('${getImageUrl(cultureImages.img3, "https://images.unsplash.com/photo-1542744173-8e7e53415bb0?auto=format&fit=crop&w=600&q=80")}')`,
                             backgroundSize: "cover",
@@ -121,55 +124,37 @@ export default function Culture({ settings }: { settings?: any }) {
                         whileInView={{ opacity: 1, y: 0 }}
                         viewport={{ once: false, amount: 0.2 }}
                         transition={{ duration: 0.6 }}
-                        className="bg-white rounded-[40px] p-8 shadow-2xl shadow-primary/5 border border-primary/5 relative overflow-hidden"
+                        className="bg-white rounded-[40px] p-6 shadow-2xl shadow-[#00453B]/5 border border-[#00453B]/5 relative overflow-hidden"
                     >
-                        <div className="flex items-center justify-between mb-8">
+                        <div className="flex items-center justify-between mb-6">
                             <div>
-                                <h4 className="text-lg font-bold text-primary">Team Diversity</h4>
-                                <p className="text-xs text-primary/40 font-medium">Distribution by region</p>
+                                <h4 className="text-lg font-bold text-[#00453B]">Team Diversity</h4>
+                                <p className="text-xs text-[#00453B]/40 font-medium">Distribution by region</p>
                             </div>
                             <div className="flex gap-2">
-                                <div className="w-8 h-8 rounded-lg bg-primary/5 flex items-center justify-center text-xs">📊</div>
+                                <div className="w-8 h-8 rounded-lg bg-[#00453B]/5 flex items-center justify-center text-xs">📊</div>
                             </div>
                         </div>
 
                         {/* Animated Bar Chart */}
-                        <div className="space-y-6">
-                            {teamDiversity.map((row, i) => (
+                        <div className="space-y-4">
+                            {(teamDiversity || []).map((row, i) => (
                                 <div key={i} className="space-y-2">
-                                    <div className="flex justify-between text-[10px] font-bold text-primary/60 uppercase tracking-widest">
+                                    <div className="flex justify-between text-[10px] font-bold text-[#00453B]/60 uppercase tracking-widest">
                                         <span>{row.label}</span>
                                         <span>{row.value}%</span>
                                     </div>
-                                    <div className="h-2 w-full bg-cream rounded-full overflow-hidden">
+                                    <div className="h-2 w-full bg-[#00453B]/5 rounded-full overflow-hidden">
                                         <motion.div
                                             initial={{ width: 0 }}
-                                            whileInView={{ width: row.value + '%' as any }}
+                                            whileInView={{ width: `${Math.min(100, Math.max(0, Number(row.value)))}%` }}
                                             viewport={{ once: false }}
                                             transition={{ duration: 1, delay: 0.5 + (i * 0.1) }}
-                                            className={`h-full ${i % 2 === 0 ? 'bg-primary' : 'bg-accent'} rounded-full`}
+                                            className={`h-full ${i % 2 === 0 ? 'bg-[#00453B]' : 'bg-[#FFBA49]'} rounded-full`}
                                         />
                                     </div>
                                 </div>
                             ))}
-                        </div>
-
-                        {/* Floating Stats */}
-                        <div className="mt-12 grid grid-cols-2 gap-4">
-                            <div className="p-6 rounded-3xl bg-cream flex justify-between items-center">
-                                <div>
-                                    <p className="text-[10px] font-bold text-primary/40 uppercase">Total Members</p>
-                                    <p className="text-2xl font-bold text-primary">200+</p>
-                                </div>
-                                <span className="text-2xl">🌍</span>
-                            </div>
-                            <div className="p-6 rounded-3xl bg-primary flex justify-between items-center text-white">
-                                <div>
-                                    <p className="text-[10px] font-bold text-white/40 uppercase">Global Hubs</p>
-                                    <p className="text-2xl font-bold">15</p>
-                                </div>
-                                <span className="text-2xl opacity-40">📍</span>
-                            </div>
                         </div>
                     </motion.div>
                 </motion.div>

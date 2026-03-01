@@ -7,10 +7,10 @@ Open a new terminal and run the following command. This uses the exact path to t
 
 ```powershell
 # Navigate to the backend folder
-cd C:\Users\ate\Pictures\TAS\backend
+cd C:\Users\ate\Documents\Projects\TAS28\backend
 
 # Start the server
-& "C:\laragon\bin\php\php-8.3.30-Win32-vs16-x64\php.exe" artisan serve --port=8081
+"C:\laragon\bin\php\php-8.3.30-Win32-vs16-x64\php.exe" artisan serve --port=8081
 ```
 > [!IMPORTANT]
 > Keep this terminal open! If you close it, the backend server will stop.
@@ -20,7 +20,7 @@ Open a second terminal and run:
 
 ```powershell
 # Navigate to the TAS folder
-cd C:\Users\ate\Pictures\TAS
+cd C:\Users\ate\Documents\Projects\TAS28
 
 # Start the development server
 npm run dev
@@ -28,7 +28,7 @@ npm run dev
 
 ## 3. Database Check
 The system is currently configured to use **SQLite**. 
-- Database file: `C:\Users\ate\Pictures\TAS\backend\database\database.sqlite`
+- Database file: `C:\Users\ate\Documents\Projects\TAS28\backend\database\database.sqlite`
 - You don't need to start a separate database service for SQLite.
 
 ---

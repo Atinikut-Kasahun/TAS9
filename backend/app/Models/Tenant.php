@@ -30,4 +30,9 @@ class Tenant extends Model
     {
         return $this->hasMany(JobPosting::class);
     }
+
+    public function applicants(): HasMany
+    {
+        return $this->hasMany(Applicant::class);
+    }
 }

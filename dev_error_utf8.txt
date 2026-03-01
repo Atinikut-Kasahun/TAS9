@@ -1,0 +1,11 @@
+﻿
+> antigravity-web@0.1.0 dev
+> next dev
+
+   Γû▓ Next.js 15.5.12
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.1.2:3000
+   - Environments: .env.local
+
+ Γ£ô Starting...
+ Γ£ô Ready in 3.9s

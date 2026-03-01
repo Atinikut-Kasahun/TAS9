@@ -14,6 +14,7 @@ import { apiFetch } from "@/lib/api";
 export default function Home() {
     const [settings, setSettings] = useState<any>({});
     const [loading, setLoading] = useState(true);
+    const [searchQuery, setSearchQuery] = useState("");
 
     useEffect(() => {
         const fetchSettings = async () => {
@@ -35,10 +36,10 @@ export default function Home() {
     return (
         <main>
             <Header />
-            <Hero settings={settings} />
+            <Hero settings={settings} onSearch={setSearchQuery} currentSearch={searchQuery} />
             <Features />
             <Culture settings={settings} />
-            <JobBoard settings={settings} />
+            <JobBoard settings={settings} searchQuery={searchQuery} onClearSearch={() => setSearchQuery("")} />
             <Impact settings={settings} />
             <Footer />
         </main>

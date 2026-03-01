@@ -25,6 +25,8 @@ function CareersContent() {
     const [selectedJob, setSelectedJob] = useState<Job | null>(null);
     const [appStep, setAppStep] = useState(1); // 1: Identity, 2: Resume/Profile, 3: Success
     const [isApplying, setIsApplying] = useState(false);
+    const [isGoogleSimulating, setIsGoogleSimulating] = useState(false);
+    const [simulatedEmail, setSimulatedEmail] = useState('');
 
     // Form State
     const [formData, setFormData] = useState({
@@ -46,7 +48,7 @@ function CareersContent() {
         const fetchJobs = async () => {
             try {
                 const data = await apiFetch('/v1/public/jobs');
-                const jobList = data || [];
+                const jobList = Array.isArray(data) ? data : (data?.data || []);
                 setJobs(jobList);
 
                 // Auto-open modal if 'apply' param is present
@@ -79,9 +81,63 @@ function CareersContent() {
     };
 
     const handleSSO = (provider: string) => {
-        // Mock SSO behavior
-        setFormData(prev => ({ ...prev, email: `user@${provider.toLowerCase()}.com`, name: 'John Doe' }));
-        setAppStep(2);
+        if (provider === 'Google') {
+            const clientID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+
+            if (clientID && (window as any).google) {
+                // Real Google Auth Initialization
+                (window as any).google.accounts.id.initialize({
+                    client_id: clientID,
+                    callback: (response: any) => {
+                        try {
+                            const base64Url = response.credential.split('.')[1];
+                            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                            const jsonPayload = decodeURIComponent(atob(base64).split('').map((c) => {
+                                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                            }).join(''));
+
+                            const profile = JSON.parse(jsonPayload);
+                            console.log("Google Profile captured:", profile);
+
+                            setFormData(prev => ({
+                                ...prev,
+                                email: profile.email,
+                                name: profile.name || prev.name
+                            }));
+                            setAppStep(2);
+                        } catch (e) {
+                            console.error("Failed to decode Google JWT", e);
+                            alert("Google login failed. Please try again or use email.");
+                        }
+                    }
+                });
+                (window as any).google.accounts.id.prompt();
+            } else {
+                // Interactive Simulation Fallback
+                console.warn("Google Client ID missing. Showing Interactive Account Picker Simulation.");
+                setIsGoogleSimulating(true);
+            }
+        } else {
+            setFormData(prev => ({ ...prev, email: `user@${provider.toLowerCase()}.com`, name: 'John Doe' }));
+            setAppStep(2);
+        }
+    };
+
+    const handleMockAccountSelect = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!simulatedEmail) return;
+
+        setIsGoogleSimulating(false);
+        setIsApplying(false); // Processing effect
+        setTimeout(() => {
+            setIsApplying(true);
+            setFormData(prev => ({
+                ...prev,
+                email: simulatedEmail,
+                name: simulatedEmail.split('@')[0].split('.').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ')
+            }));
+            setAppStep(2);
+        }, 1200);
     };
 
     const handleResumeUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -243,10 +299,6 @@ function CareersContent() {
                                                 <img src="https://www.gstatic.com/images/branding/product/1x/gsa_512dp.png" className="w-6 h-6" />
                                                 Continue with Google
                                             </button>
-                                            <button onClick={() => handleSSO('Outlook')} className="w-full flex items-center justify-center gap-3 py-4 bg-white border-2 border-gray-100 rounded-2xl hover:border-sky-600 hover:bg-sky-50/10 transition-all font-bold text-[#1A2B3D]">
-                                                <img src="https://logodownload.org/wp-content/uploads/2020/04/microsoft-outlook-logo-0.png" className="w-6 h-6" />
-                                                Continue with Outlook
-                                            </button>
                                         </div>
 
                                         <div className="relative">
@@ -394,6 +446,59 @@ function CareersContent() {
                                     </motion.div>
                                 )}
                             </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* Google Identity Simulation Modal (Interactive) */}
+            <AnimatePresence>
+                {isGoogleSimulating && (
+                    <div className="fixed inset-0 z-[300] flex items-center justify-center p-6">
+                        <motion.div
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={() => setIsGoogleSimulating(false)}
+                            className="fixed inset-0 bg-white/60 backdrop-blur-sm"
+                        />
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+                            className="bg-white w-full max-w-[400px] rounded-3xl shadow-2xl border border-gray-100 overflow-hidden relative z-[310] p-10 space-y-8"
+                        >
+                            <div className="text-center space-y-4">
+                                <img src="https://www.gstatic.com/images/branding/product/1x/gsa_512dp.png" className="w-12 h-12 mx-auto" />
+                                <div className="space-y-1">
+                                    <h3 className="text-xl font-black text-[#1A2B3D]">Sign in with Google</h3>
+                                    <p className="text-xs text-gray-500 font-medium tracking-tight">to continue to Droga Hiring Hub</p>
+                                </div>
+                            </div>
+
+                            <form onSubmit={handleMockAccountSelect} className="space-y-6">
+                                <div className="space-y-2">
+                                    <input
+                                        autoFocus
+                                        type="email"
+                                        required
+                                        placeholder="Email or phone"
+                                        className="w-full px-4 py-3 border border-gray-200 rounded-lg outline-none focus:border-blue-500 font-medium text-sm transition-all"
+                                        value={simulatedEmail}
+                                        onChange={(e) => setSimulatedEmail(e.target.value)}
+                                    />
+                                    <p className="text-[11px] text-blue-600 font-bold cursor-pointer hover:underline">Forgot email?</p>
+                                </div>
+
+                                <div className="text-[13px] text-gray-500 leading-relaxed font-medium">
+                                    To continue, Google will share your name, email address, language preference, and profile picture with Droga.
+                                </div>
+
+                                <div className="flex justify-between items-center pt-4">
+                                    <button type="button" onClick={() => setIsGoogleSimulating(false)} className="text-sm font-bold text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-lg transition-colors">
+                                        Create account
+                                    </button>
+                                    <button type="submit" className="bg-blue-600 text-white px-8 py-2.5 rounded-lg text-sm font-bold hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-all">
+                                        Next
+                                    </button>
+                                </div>
+                            </form>
                         </motion.div>
                     </div>
                 )}

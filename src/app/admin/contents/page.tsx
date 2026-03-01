@@ -79,12 +79,13 @@ export default function SiteEditor() {
     const fetchSettings = async () => {
         try {
             const data = await apiFetch('/v1/global-settings');
-            if (data?.site_hero_stats) setHeroStats(JSON.parse(data.site_hero_stats));
-            if (data?.site_hero_mock_stats) setMockStats(JSON.parse(data.site_hero_mock_stats));
-            if (data?.site_culture_text) setCultureText(JSON.parse(data.site_culture_text));
-            if (data?.site_culture_images) setCultureImages(JSON.parse(data.site_culture_images));
-            if (data?.site_team_diversity) setTeamDiversity(JSON.parse(data.site_team_diversity));
-            if (data?.site_job_departments) setJobDepartments(JSON.parse(data.site_job_departments));
+            const parseIfString = (val: any) => typeof val === 'string' ? JSON.parse(val) : val;
+            if (data?.site_hero_stats) setHeroStats(parseIfString(data.site_hero_stats));
+            if (data?.site_hero_mock_stats) setMockStats(parseIfString(data.site_hero_mock_stats));
+            if (data?.site_culture_text) setCultureText(parseIfString(data.site_culture_text));
+            if (data?.site_culture_images) setCultureImages(parseIfString(data.site_culture_images));
+            if (data?.site_team_diversity) setTeamDiversity(parseIfString(data.site_team_diversity));
+            if (data?.site_job_departments) setJobDepartments(parseIfString(data.site_job_departments));
         } catch (error) {
             console.error('Failed to fetch settings:', error);
         } finally {
@@ -97,7 +98,7 @@ export default function SiteEditor() {
         try {
             await apiFetch('/v1/global-settings', {
                 method: 'POST',
-                body: JSON.stringify({ key, value: JSON.stringify(value) })
+                body: JSON.stringify({ key, value })
             });
 
             // Show success toast
@@ -176,7 +177,7 @@ export default function SiteEditor() {
                                 <label className="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wide">Average Rating</label>
                                 <input
                                     type="text"
-                                    placeholder="e.g. 4.8"
+                                    placeholder="e.g. 9.8"
                                     className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-[#1F7A6E] outline-none"
                                     value={mockStats.rating}
                                     onChange={e => setMockStats({ ...mockStats, rating: e.target.value })}
@@ -368,8 +369,11 @@ export default function SiteEditor() {
                                     <div className="flex-1 pt-5">
                                         <div className="h-2 bg-gray-200 rounded-full w-full overflow-hidden">
                                             <div
-                                                className="h-full bg-[#1F7A6E] transition-all duration-500"
-                                                style={{ width: `${item.value}%` }}
+                                                className="h-full transition-all duration-500"
+                                                style={{
+                                                    width: `${item.value}%`,
+                                                    backgroundColor: idx % 2 === 0 ? '#1F7A6E' : '#FFBA49'
+                                                }}
                                             />
                                         </div>
                                     </div>

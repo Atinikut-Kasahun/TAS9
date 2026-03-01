@@ -26,6 +26,15 @@ class JobRequisitionController extends Controller
             $query->where('requested_by', $user->id);
         }
 
+        if ($request->has('search') && $request->search) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'LIKE', "%{$search}%")
+                    ->orWhere('department', 'LIKE', "%{$search}%")
+                    ->orWhere('priority', 'LIKE', "%{$search}%");
+            });
+        }
+
         $requisitions = $query->orderBy('created_at', 'desc')->get();
 
         // Calculate KPIs
@@ -54,6 +63,7 @@ class JobRequisitionController extends Controller
         $request->validate([
             'title' => 'required|string|max:255',
             'department' => 'required|string|max:255',
+            'location' => 'required|string|max:255',
             'description' => 'nullable|string',
             'headcount' => 'required|integer|min:1',
             'priority' => 'required|in:low,medium,high,urgent',
@@ -72,6 +82,7 @@ class JobRequisitionController extends Controller
             'title' => $request->title,
             'description' => $request->description,
             'department' => $request->department,
+            'location' => $request->location,
             'headcount' => $request->headcount ?? 1,
             'budget' => $request->budget,
             'position_type' => $request->position_type ?? 'new',

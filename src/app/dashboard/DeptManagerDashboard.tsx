@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiFetch } from '@/lib/api';
 
@@ -21,7 +22,7 @@ interface Requisition {
 const INITIAL_FORM_DATA = {
     title: '',
     department: '',
-    location: 'Addis Ababa (Bole)',
+    location: '',
     headcount: 1,
     priority: 'medium',
     budget: 0,
@@ -30,18 +31,55 @@ const INITIAL_FORM_DATA = {
 };
 
 export default function DeptManagerDashboard({ user, activeTab: initialTab, onLogout }: { user: any; activeTab: string; onLogout: () => void }) {
-    const [requisitions, setRequisitions] = useState<Requisition[]>([]);
+    const [requisitions, setRequisitions] = useState<Requisition[] | null>(null);
     const [loading, setLoading] = useState(true);
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [wizardStep, setWizardStep] = useState(1);
     const [formData, setFormData] = useState(INITIAL_FORM_DATA);
     const [submitting, setSubmitting] = useState(false);
+    const [jobs, setJobs] = useState<any[] | null>(null);
+    const [jobsMeta, setJobsMeta] = useState<any>(null);
+    const [reqsMeta, setReqsMeta] = useState<any>(null);
+    const [jobsPage, setJobsPage] = useState(1);
+    const [reqsPage, setReqsPage] = useState(1);
     const [localTab, setLocalTab] = useState(initialTab === 'HiringPlan' ? 'HIRING PLAN' : 'JOBS');
+    const [search, setSearch] = useState(''); // live search term from URL
+    const router = useRouter();
 
-    const fetchData = async () => {
+    useEffect(() => {
+        setLoading(true);
+        setJobs(null);
+        setRequisitions(null);
+        setLocalTab(initialTab === 'HiringPlan' ? 'HIRING PLAN' : 'JOBS');
+        fetchData();
+    }, [initialTab]);
+
+    useEffect(() => {
+        // Poll URL for live search changes written by Navbar
+        const interval = setInterval(() => {
+            const params = new URLSearchParams(window.location.search);
+            const s = params.get('search') ?? '';
+            setSearch(prev => {
+                const updated = prev !== s ? s : prev;
+                if (prev !== s) console.log('[DM Dashboard] Search updated:', s);
+                return updated;
+            });
+        }, 200);
+        return () => clearInterval(interval);
+    }, []);
+
+    const fetchData = async (jp = jobsPage, rp = reqsPage) => {
         try {
-            const json = await apiFetch('/v1/requisitions');
-            setRequisitions(json.data || []);
+            const searchParam = search ? `&search=${encodeURIComponent(search)}` : '';
+            console.log('[DM Dashboard] Fetching data with search:', search || '(none)');
+            const [reqRes, jobsRes] = await Promise.all([
+                apiFetch(`/v1/requisitions?page=${rp}${searchParam}`),
+                apiFetch(`/v1/jobs?page=${jp}${searchParam}`)
+            ]);
+            setRequisitions(reqRes.data || []);
+            setReqsMeta(reqRes);
+            setJobs(jobsRes.data || []);
+            setJobsMeta(jobsRes);
         } catch (e) {
             console.error(e);
         } finally {
@@ -49,7 +87,7 @@ export default function DeptManagerDashboard({ user, activeTab: initialTab, onLo
         }
     };
 
-    useEffect(() => { fetchData(); }, []);
+    useEffect(() => { fetchData(jobsPage, reqsPage); }, [jobsPage, reqsPage, search]);
 
     const handleSubmit = async () => {
         setSubmitting(true);
@@ -84,26 +122,42 @@ export default function DeptManagerDashboard({ user, activeTab: initialTab, onLo
             {/* Page Header */}
             <div className="flex justify-between items-end mb-4">
                 <div className="space-y-4">
-                    <h1 className="text-[32px] font-bold text-[#1A2B3D] tracking-tight">Droga Pharma</h1>
+                    <h1 className="text-[32px] font-bold text-[#1A2B3D] tracking-tight">{user.tenant?.name || 'Droga Pharma'}</h1>
 
                     {/* Sub Tabs */}
-                    <div className="flex gap-8 border-b border-gray-100">
-                        {['JOBS', 'HIRING PLAN'].map((t) => (
-                            <button
-                                key={t}
-                                onClick={() => setLocalTab(t)}
-                                className={`pb-3 text-[13px] font-black tracking-widest transition-all relative ${localTab === t ? 'text-[#1A2B3D]' : 'text-gray-400 hover:text-gray-600'
-                                    }`}
-                            >
-                                {t}
-                                {localTab === t && (
-                                    <motion.div
-                                        layoutId="activeSubTabDM"
-                                        className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-[#1F7A6E]"
-                                    />
-                                )}
-                            </button>
-                        ))}
+                    <div className="flex gap-10 border-b border-gray-100 mt-2">
+                        {['JOBS', 'HIRING PLAN'].map((t) => {
+                            const isSectionActive = (t === 'JOBS' && initialTab === 'Jobs') || (t === 'HIRING PLAN' && initialTab === 'HiringPlan');
+                            const isSubActive = localTab === t;
+                            const isActive = isSectionActive || isSubActive;
+
+                            return (
+                                <button
+                                    key={t}
+                                    onClick={() => {
+                                        if (t === 'JOBS' && initialTab !== 'Jobs') {
+                                            router.push('/dashboard?tab=Jobs');
+                                        } else if (t === 'HIRING PLAN' && initialTab !== 'HiringPlan') {
+                                            router.push('/dashboard?tab=HiringPlan');
+                                        } else {
+                                            setLocalTab(t);
+                                        }
+                                    }}
+                                    className={`pb-4 text-[12px] font-black tracking-[0.15em] transition-all relative ${isActive
+                                        ? 'text-[#1F7A6E]'
+                                        : 'text-gray-400 hover:text-gray-600'
+                                        }`}
+                                >
+                                    <span className="uppercase">{t}</span>
+                                    {isActive && (
+                                        <motion.div
+                                            layoutId="activeSubTabDM"
+                                            className="absolute bottom-0 left-0 right-0 h-[4px] bg-[#1F7A6E] rounded-t-full"
+                                        />
+                                    )}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
 
@@ -125,63 +179,144 @@ export default function DeptManagerDashboard({ user, activeTab: initialTab, onLo
             ) : (
                 <div className="bg-white rounded border border-gray-100 shadow-sm overflow-hidden min-h-[400px]">
                     {localTab === 'JOBS' && (
-                        <div className="p-20 text-center text-gray-400 italic">Access your active jobs here (In Progress).</div>
+                        <>
+                            <table className="w-full text-left">
+                                <thead className="bg-[#F9FAFB] border-b border-gray-100">
+                                    <tr>
+                                        {['POSITION', 'LOCATION', 'DEPARTMENT', 'STATUS', 'POSTED ON'].map(h => (
+                                            <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                    {jobs === null ? null : jobs.length === 0 ? (
+                                        <tr><td colSpan={5} className="px-8 py-20 text-center text-gray-400 italic text-sm">No active jobs posted yet for {user.tenant?.name || 'this company'}.</td></tr>
+                                    ) : jobs.map((job: any) => (
+                                        <tr key={job.id} className="hover:bg-gray-50 transition-colors cursor-pointer group">
+                                            <td className="px-8 py-6">
+                                                <p className="font-bold text-[#1A2B3D] group-hover:text-[#1F7A6E] transition-colors">{job.title}</p>
+                                            </td>
+                                            <td className="px-8 py-6 text-sm text-gray-500">{job.location || '—'}</td>
+                                            <td className="px-8 py-6 text-sm text-gray-500">
+                                                {job.department || job.requisition?.department || 'General'}
+                                            </td>
+                                            <td className="px-8 py-6">
+                                                <span className={`px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest ${job.status === 'active' ? 'bg-emerald-50 text-emerald-600' : job.status === 'closed' ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-400'}`}>
+                                                    {job.status}
+                                                </span>
+                                            </td>
+                                            <td className="px-8 py-6 text-[13px] text-gray-600">
+                                                {new Date(job.created_at).toLocaleDateString()}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {jobsMeta?.last_page > 1 && (
+                                <div className="px-8 py-4 bg-gray-50/50 border-t border-gray-100 flex items-center justify-between">
+                                    <span className="text-[11px] font-black text-gray-400 uppercase tracking-widest">
+                                        Page {jobsPage} of {jobsMeta.last_page}
+                                    </span>
+                                    <div className="flex gap-2">
+                                        <button
+                                            disabled={jobsPage === 1}
+                                            onClick={() => setJobsPage(p => p - 1)}
+                                            className="w-8 h-8 rounded border border-gray-200 flex items-center justify-center text-gray-400 disabled:opacity-30"
+                                        >
+                                            ←
+                                        </button>
+                                        <button
+                                            disabled={jobsPage === jobsMeta.last_page}
+                                            onClick={() => setJobsPage(p => p + 1)}
+                                            className="w-8 h-8 rounded border border-gray-200 flex items-center justify-center text-gray-400 disabled:opacity-30"
+                                        >
+                                            →
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </>
                     )}
 
                     {localTab === 'HIRING PLAN' && (
-                        <table className="w-full text-left">
-                            <thead className="bg-[#F9FAFB] border-b border-gray-100">
-                                <tr>
-                                    {['REQUISITION', 'HIRING MANAGER', 'LOCATION', 'SALARY', 'PLAN DATE', 'STATUS'].map(h => (
-                                        <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-50">
-                                {requisitions.length === 0 ? (
-                                    <tr><td colSpan={6} className="px-8 py-20 text-center text-gray-400 italic text-sm">You haven't created any requisitions yet.</td></tr>
-                                ) : requisitions.map((req) => (
-                                    <tr key={req.id} className="hover:bg-gray-50 transition-colors group cursor-pointer">
-                                        <td className="px-8 py-6">
-                                            <p className="font-black text-[13px] text-[#0066CC] hover:underline group-hover:text-[#1F7A6E]">
-                                                REQ{req.id} {req.title}
-                                            </p>
-                                            <p className="text-[11px] text-gray-400 mt-0.5 tracking-tight">
-                                                {req.department} · {req.position_type === 'replacement' ? '↺ Replacement' : '✦ New'}
-                                            </p>
-                                        </td>
-                                        <td className="px-8 py-6 text-[13px] text-gray-600">
-                                            {user.name} (You)
-                                        </td>
-                                        <td className="px-8 py-6 text-[13px] text-gray-600">
-                                            {req.location || 'Addis Ababa'}
-                                        </td>
-                                        <td className="px-8 py-6 text-[13px] text-[#1A2B3D] font-black">
-                                            ${req.budget ? (req.budget / 1000).toFixed(0) + 'k' : '45k'} /yr
-                                        </td>
-                                        <td className="px-8 py-6 text-[13px] text-gray-600">
-                                            {new Date(req.created_at).toLocaleDateString()}
-                                        </td>
-                                        <td className="px-8 py-6">
-                                            <div className="flex items-center justify-between gap-4">
-                                                <span className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest ${req.status === 'approved' ? 'bg-emerald-50 text-emerald-600' :
-                                                    req.status === 'pending' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-500'
-                                                    }`}>
-                                                    {req.status}
-                                                </span>
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); handleDuplicate(req.id); }}
-                                                    className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-[#1F7A6E] transition-all"
-                                                    title="Duplicate"
-                                                >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
-                                                </button>
-                                            </div>
-                                        </td>
+                        <>
+                            <table className="w-full text-left">
+                                <thead className="bg-[#F9FAFB] border-b border-gray-100">
+                                    <tr>
+                                        {['REQUISITION', 'HIRING MANAGER', 'LOCATION', 'SALARY', 'PLAN DATE', 'STATUS'].map(h => (
+                                            <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
+                                        ))}
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                    {requisitions === null ? null : requisitions.length === 0 ? (
+                                        <tr><td colSpan={6} className="px-8 py-20 text-center text-gray-400 italic text-sm">No requisitions created yet for {user.tenant?.name || 'this company'}.</td></tr>
+                                    ) : requisitions.map((req) => (
+                                        <tr key={req.id} className="hover:bg-gray-50 transition-colors group cursor-pointer">
+                                            <td className="px-8 py-6">
+                                                <p className="font-black text-[13px] text-[#0066CC] hover:underline group-hover:text-[#1F7A6E]">
+                                                    REQ{req.id} {req.title}
+                                                </p>
+                                                <p className="text-[11px] text-gray-400 mt-0.5 tracking-tight">
+                                                    {req.department} · {req.position_type === 'replacement' ? '↺ Replacement' : '✦ New'}
+                                                </p>
+                                            </td>
+                                            <td className="px-8 py-6 text-[13px] text-gray-600">
+                                                {user.name} (You)
+                                            </td>
+                                            <td className="px-8 py-6 text-[13px] text-gray-600">
+                                                {req.location || '—'}
+                                            </td>
+                                            <td className="px-8 py-6 text-[13px] text-[#1A2B3D] font-black">
+                                                {req.budget ? req.budget.toLocaleString() : '15,000'} ETB /mo
+                                            </td>
+                                            <td className="px-8 py-6 text-[13px] text-gray-600">
+                                                {new Date(req.created_at).toLocaleDateString()}
+                                            </td>
+                                            <td className="px-8 py-6">
+                                                <div className="flex items-center justify-between gap-4">
+                                                    <span className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest ${req.status === 'approved' ? 'bg-emerald-50 text-emerald-600' :
+                                                        req.status === 'pending' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-500'
+                                                        }`}>
+                                                        {req.status}
+                                                    </span>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleDuplicate(req.id); }}
+                                                        className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-[#1F7A6E] transition-all"
+                                                        title="Duplicate"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {reqsMeta?.last_page > 1 && (
+                                <div className="px-8 py-4 bg-gray-50/50 border-t border-gray-100 flex items-center justify-between">
+                                    <span className="text-[11px] font-black text-gray-400 uppercase tracking-widest">
+                                        Page {reqsPage} of {reqsMeta.last_page}
+                                    </span>
+                                    <div className="flex gap-2">
+                                        <button
+                                            disabled={reqsPage === 1}
+                                            onClick={() => setReqsPage(p => p - 1)}
+                                            className="w-8 h-8 rounded border border-gray-200 flex items-center justify-center text-gray-400 disabled:opacity-30"
+                                        >
+                                            ←
+                                        </button>
+                                        <button
+                                            disabled={reqsPage === reqsMeta.last_page}
+                                            onClick={() => setReqsPage(p => p + 1)}
+                                            className="w-8 h-8 rounded border border-gray-200 flex items-center justify-center text-gray-400 disabled:opacity-30"
+                                        >
+                                            →
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </>
                     )}
                 </div>
             )}
@@ -303,14 +438,14 @@ export default function DeptManagerDashboard({ user, activeTab: initialTab, onLo
                                             <h3 className="text-[11px] font-black text-[#1F7A6E] uppercase tracking-widest">Financials & Context</h3>
                                             <div className="space-y-4">
                                                 <div>
-                                                    <label className="block text-[11px] font-black text-gray-400 uppercase tracking-widest mb-1.5 leading-none">Annual Salary Budget ($)</label>
+                                                    <label className="block text-[11px] font-black text-gray-400 uppercase tracking-widest mb-1.5 leading-none">Monthly Salary Budget (ETB)</label>
                                                     <div className="relative">
-                                                        <span className="absolute left-5 top-1/2 -translate-y-1/2 font-black text-gray-300">$</span>
+                                                        <span className="absolute left-5 top-1/2 -translate-y-1/2 font-black text-gray-300">ETB</span>
                                                         <input
                                                             type="number"
-                                                            className="w-full pl-10 pr-5 py-4 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-4 focus:ring-[#1F7A6E]/10 focus:border-[#1F7A6E] transition-all font-black text-[#1A2B3D]"
-                                                            value={formData.budget}
-                                                            onChange={(e) => setFormData({ ...formData, budget: parseInt(e.target.value) })}
+                                                            className="w-full pl-14 pr-5 py-4 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-4 focus:ring-[#1F7A6E]/10 focus:border-[#1F7A6E] transition-all font-black text-[#1A2B3D]"
+                                                            value={formData.budget || ''}
+                                                            onChange={(e) => setFormData({ ...formData, budget: parseInt(e.target.value) || 0 })}
                                                         />
                                                     </div>
                                                 </div>
@@ -357,6 +492,6 @@ export default function DeptManagerDashboard({ user, activeTab: initialTab, onLo
                     </>
                 )}
             </AnimatePresence>
-        </div>
+        </div >
     );
 }

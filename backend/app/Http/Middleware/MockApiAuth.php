@@ -15,7 +15,7 @@ class MockApiAuth
      */
     public function handle(Request $request, Closure $next): Response
     {
-        $token = $request->bearerToken();
+        $token = $request->bearerToken() ?: $request->query('token');
 
         if ($token && str_starts_with($token, 'mock-token-id-')) {
             $userId = str_replace('mock-token-id-', '', $token);

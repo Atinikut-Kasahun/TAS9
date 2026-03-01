@@ -4,9 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\GlobalSetting;
 use App\Models\Event;
+use App\Models\User;
+use App\Notifications\EventNotification;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Notification;
 
 class GroupContentController extends Controller
 {
@@ -41,7 +44,12 @@ class GroupContentController extends Controller
      */
     public function listEvents(): JsonResponse
     {
-        return response()->json(Event::with('tenant')->orderBy('event_date', 'desc')->get());
+        return response()->json(
+            Event::with('tenant')
+                ->where('event_date', '>=', now())
+                ->orderBy('event_date', 'asc')
+                ->get()
+        );
     }
 
     /**
@@ -53,18 +61,20 @@ class GroupContentController extends Controller
             'tenant_id' => 'required|exists:tenants,id',
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
-            'event_date' => 'required|date',
+            'event_date' => 'required|date_format:Y-m-d\TH:i',
             'location' => 'nullable|string',
             'status' => 'required|in:upcoming,ongoing,past,cancelled',
-            'image' => 'nullable|image|max:2048',
         ]);
 
-        if ($request->hasFile('image')) {
-            $path = $request->file('image')->store('events', 'public');
-            $validated['image_path'] = $path;
-        }
-
         $event = Event::create($validated);
+
+        // Notify all users of the selected company
+        $users = User::where('tenant_id', $validated['tenant_id'])->get();
+        Notification::send($users, new EventNotification(
+            $event->title,
+            $event->event_date,
+            $event->location ?? 'N/A'
+        ));
 
         return response()->json(['message' => 'Event created successfully', 'event' => $event]);
     }

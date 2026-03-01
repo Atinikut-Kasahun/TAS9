@@ -15,75 +15,79 @@ Route::middleware('mock.auth')->group(function () {
 
     // Requisition API
     Route::prefix('v1')->group(function () {
-        Route::get('/dashboard', [\App\Http\Controllers\DashboardController::class, 'index']);
-        Route::post('/logout', [\App\Http\Controllers\AuthController::class, 'logout']);
-        Route::get('/requisitions', [\App\Http\Controllers\JobRequisitionController::class, 'index']);
-        Route::post('/requisitions', [\App\Http\Controllers\JobRequisitionController::class, 'store']);
-        Route::post('/requisitions/bulk-approve', [\App\Http\Controllers\JobRequisitionController::class, 'bulkApprove']);
-        Route::post('/requisitions/{id}/duplicate', [\App\Http\Controllers\JobRequisitionController::class, 'duplicate']);
-        Route::patch('/requisitions/{id}/status', [\App\Http\Controllers\JobRequisitionController::class, 'updateStatus']);
+        // ─────────────────────────────────────────────────────────
+        // TENANT-SCOPED ROUTES (Requires a valid company assignment)
+        // ─────────────────────────────────────────────────────────
+        Route::middleware('tenant.scope')->group(function () {
+            Route::get('/dashboard', [\App\Http\Controllers\DashboardController::class, 'index']);
+            Route::get('/requisitions', [\App\Http\Controllers\JobRequisitionController::class, 'index']);
+            Route::post('/requisitions', [\App\Http\Controllers\JobRequisitionController::class, 'store']);
+            Route::post('/requisitions/bulk-approve', [\App\Http\Controllers\JobRequisitionController::class, 'bulkApprove']);
+            Route::post('/requisitions/{id}/duplicate', [\App\Http\Controllers\JobRequisitionController::class, 'duplicate']);
+            Route::patch('/requisitions/{id}/status', [\App\Http\Controllers\JobRequisitionController::class, 'updateStatus']);
 
-        Route::get('/jobs', [\App\Http\Controllers\JobPostingController::class, 'index']);
-        Route::post('/jobs', [\App\Http\Controllers\JobPostingController::class, 'store']);
+            Route::get('/jobs', [\App\Http\Controllers\JobPostingController::class, 'index']);
+            Route::post('/jobs', [\App\Http\Controllers\JobPostingController::class, 'store']);
+            Route::apiResource('jobs', \App\Http\Controllers\JobController::class)->except(['index', 'show']);
 
-        // Internal Job Management
-        Route::apiResource('jobs', \App\Http\Controllers\JobController::class)->except(['index', 'show']);
+            // Applicant Management
+            Route::get('/applicants/export', [\App\Http\Controllers\ApplicantController::class, 'export']);
+            Route::get('/applicants/stats', [\App\Http\Controllers\ApplicantController::class, 'stats']);
+            Route::get('/applicants', [\App\Http\Controllers\ApplicantController::class, 'index']);
+            Route::patch('/applicants/{id}/status', [\App\Http\Controllers\ApplicantController::class, 'updateStatus']);
+            Route::post('/applicants/{id}/mention', [\App\Http\Controllers\ApplicantController::class, 'mention']);
 
-        // Applicant Management
-        Route::get('/applicants/stats', [\App\Http\Controllers\ApplicantController::class, 'stats']);
-        Route::get('/applicants', [\App\Http\Controllers\ApplicantController::class, 'index']);
-        Route::patch('/applicants/{id}/status', [\App\Http\Controllers\ApplicantController::class, 'updateStatus']);
-        Route::post('/applicants/{id}/mention', [\App\Http\Controllers\ApplicantController::class, 'mention']);
-        // Interview Management
-        Route::get('/interviews', [\App\Http\Controllers\InterviewController::class, 'index']);
-        Route::post('/interviews', [\App\Http\Controllers\InterviewController::class, 'store']);
-        Route::patch('/interviews/{id}', [\App\Http\Controllers\InterviewController::class, 'update']);
-        // Offer Management
-        Route::post('/offers/generate', [\App\Http\Controllers\OfferController::class, 'generate']);
+            // Interview Management
+            Route::get('/interviews', [\App\Http\Controllers\InterviewController::class, 'index']);
+            Route::post('/interviews', [\App\Http\Controllers\InterviewController::class, 'store']);
+            Route::patch('/interviews/{id}', [\App\Http\Controllers\InterviewController::class, 'update']);
 
-        // Notifications
-        Route::get('/notifications', [\App\Http\Controllers\NotificationController::class, 'index']);
-        Route::post('/notifications/{id}/read', [\App\Http\Controllers\NotificationController::class, 'markAsRead']);
-        Route::post('/notifications/mark-all-read', [\App\Http\Controllers\NotificationController::class, 'markAllAsRead']);
-        Route::post('/notifications/{id}/reply', [\App\Http\Controllers\NotificationController::class, 'reply']);
+            // Offer Management
+            Route::post('/offers/generate', [\App\Http\Controllers\OfferController::class, 'generate']);
 
-        // Users for mentions & compose
-        Route::get('/users', function (Request $request) {
-            return response()->json(\App\Models\User::where('tenant_id', $request->user()->tenant_id)
-                ->where('id', '!=', $request->user()->id)
-                ->get(['id', 'name', 'email']));
+            // Notifications & Messages
+            Route::get('/notifications', [\App\Http\Controllers\NotificationController::class, 'index']);
+            Route::post('/notifications/{id}/read', [\App\Http\Controllers\NotificationController::class, 'markAsRead']);
+            Route::post('/notifications/mark-all-read', [\App\Http\Controllers\NotificationController::class, 'markAllAsRead']);
+            Route::post('/notifications/{id}/reply', [\App\Http\Controllers\NotificationController::class, 'reply']);
+
+            Route::get('/users', [\App\Http\Controllers\MessageController::class, 'users']);
+            Route::post('/messages/send', [\App\Http\Controllers\MessageController::class, 'send']);
+            Route::get('/team-users', [\App\Http\Controllers\UserController::class, 'index']); // New management route
         });
 
-        // Compose a free-form direct message to any colleague
-        Route::post('/messages/send', function (Request $request) {
-            $request->validate([
-                'to_user_id' => 'required|exists:users,id',
-                'message' => 'required|string|max:2000',
-            ]);
-            $recipient = \App\Models\User::where('id', $request->to_user_id)
-                ->where('tenant_id', $request->user()->tenant_id)
-                ->firstOrFail();
-            $recipient->notify(new \App\Notifications\DirectMessage(
-                $request->user()->name,
-                $request->user()->id,
-                $request->message
-            ));
-            return response()->json(['success' => true]);
-        });
-
-        // Global Settings & Events (Command Center)
+        // ─────────────────────────────────────────────────────────
+        // GLOBAL ADMIN ROUTES (No tenant scope, requires Admin role)
+        // ─────────────────────────────────────────────────────────
         Route::get('/global-settings', [\App\Http\Controllers\GroupContentController::class, 'getSettings']);
         Route::post('/global-settings', [\App\Http\Controllers\GroupContentController::class, 'updateSetting']);
         Route::post('/global-settings/upload', [\App\Http\Controllers\GroupContentController::class, 'uploadFile']);
         Route::get('/global-events', [\App\Http\Controllers\GroupContentController::class, 'listEvents']);
         Route::post('/global-events', [\App\Http\Controllers\GroupContentController::class, 'storeEvent']);
 
-        // User Management (Global Admin)
         Route::get('/global-users', [\App\Http\Controllers\UserController::class, 'index']);
         Route::post('/global-users', [\App\Http\Controllers\UserController::class, 'store']);
-        Route::get('/tenants', function () {
-            return response()->json(\App\Models\Tenant::all());
-        });
+        Route::patch('/global-users/{id}/role', [\App\Http\Controllers\UserController::class, 'updateRole']);
+        Route::post('/global-users/{id}/reset-password', [\App\Http\Controllers\UserController::class, 'resetPassword']);
+        Route::delete('/global-users/{id}', [\App\Http\Controllers\UserController::class, 'destroy']);
+
+        Route::get('/tenants', [\App\Http\Controllers\TenantController::class, 'index']);
+        Route::post('/tenants', [\App\Http\Controllers\TenantController::class, 'store']);
+        Route::patch('/tenants/{id}', [\App\Http\Controllers\TenantController::class, 'update']);
+        Route::delete('/tenants/{id}', [\App\Http\Controllers\TenantController::class, 'destroy']);
+
+        // ─────────────────────────────────────────────────────────
+        // GLOBAL ADMIN — Cross-Tenant Analytics & Management
+        // ─────────────────────────────────────────────────────────
+        Route::get('/admin/jobs', [\App\Http\Controllers\JobPostingController::class, 'indexGlobal']);
+        Route::get('/admin/applicants', [\App\Http\Controllers\ApplicantController::class, 'index']);
+        Route::patch('/admin/applicants/{id}/status', [\App\Http\Controllers\ApplicantController::class, 'updateStatus']);
+        Route::get('/admin/interviews', [\App\Http\Controllers\InterviewController::class, 'indexGlobal']);
+        Route::post('/admin/interviews', [\App\Http\Controllers\InterviewController::class, 'store']);
+        Route::get('/admin/reports', [\App\Http\Controllers\DashboardController::class, 'reportsData']);
+        Route::get('/admin/search', [\App\Http\Controllers\GlobalSearchController::class, 'search']);
+        Route::get('/admin/users', [\App\Http\Controllers\MessageController::class, 'users']);
+        Route::post('/admin/messages/send', [\App\Http\Controllers\MessageController::class, 'send']);
     });
 });
 

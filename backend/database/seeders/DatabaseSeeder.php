@@ -87,7 +87,7 @@ class DatabaseSeeder extends Seeder
                 'tenant_id' => $tenant->id,
                 'title' => 'Sample Job for ' . $tenant->name,
                 'department' => 'Operations',
-                'location' => 'Addis Ababa',
+                'location' => 'Main Office',
                 'description' => 'Detailed description of the role...',
                 'status' => 'active',
             ]);
@@ -112,6 +112,7 @@ class DatabaseSeeder extends Seeder
                     'requested_by' => $manager->id,
                     'title' => 'Headcount Request: New Specialist',
                     'department' => 'Operations',
+                    'location' => 'Remote / Branch Office',
                     'headcount' => 1,
                     'status' => 'pending',
                 ]);

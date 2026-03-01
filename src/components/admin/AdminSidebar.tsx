@@ -12,6 +12,7 @@ import {
 
 interface AdminSidebarProps {
     user: any;
+    tenants?: any[];
 }
 
 interface NavItem {
@@ -21,56 +22,60 @@ interface NavItem {
     children?: { label: string; href: string }[];
 }
 
-const navGroups = [
-    {
-        group: 'Overview',
-        items: [
-            { label: 'Dashboard', href: '/admin/dashboard', icon: <LayoutDashboard size={16} /> },
-            { label: 'Reports', href: '/admin/dashboard?tab=Reports', icon: <FileText size={16} /> },
-        ]
-    },
-    {
-        group: 'Companies',
-        items: [
-            {
-                label: 'Sister Companies', icon: <Building2 size={16} />,
-                children: [
-                    { label: 'Droga Pharma', href: '/admin/dashboard?company=droga-pharma' },
-                    { label: 'Droga Physiotherapy', href: '/admin/dashboard?company=droga-physiotherapy' },
-                    { label: 'Droga Diagnostic', href: '/admin/dashboard?company=droga-diagnostic' },
-                    { label: 'Droga Health', href: '/admin/dashboard?company=droga-health' },
-                    { label: 'Droga Coffee', href: '/admin/dashboard?company=droga-coffee' },
-                ]
-            },
-        ]
-    },
-    {
-        group: 'Recruitment',
-        items: [
-            { label: 'Job Posts', href: '/dashboard?tab=Jobs', icon: <Briefcase size={16} /> },
-            { label: 'Applicants', href: '/dashboard?tab=Candidates', icon: <Users size={16} /> },
-            { label: 'Interview Schedule', href: '/dashboard?tab=Calendar', icon: <CalendarClock size={16} /> },
-            { label: 'Hiring Plan', href: '/dashboard?tab=HiringPlan', icon: <ClipboardList size={16} /> },
-        ]
-    },
-    {
-        group: 'Content',
-        items: [
-            { label: 'Site Editor', href: '/admin/contents', icon: <Globe size={16} /> },
-            { label: 'Events', href: '/admin/contents?tab=events', icon: <ImageIcon size={16} /> },
-        ]
-    },
-];
+// Removed static navGroups since it needs dynamic tenants
 
 const bottomItems = [
     { label: 'Settings', href: '/admin/settings', icon: <Settings size={16} /> },
-    { label: 'Help & Support', href: '#', icon: <HelpCircle size={16} /> },
 ];
 
-export default function AdminSidebar({ user }: AdminSidebarProps) {
+export default function AdminSidebar({ user, tenants = [] }: AdminSidebarProps) {
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({ 'Sister Companies': false });
+    const isAdmin = user?.roles?.some((r: any) => r.slug === 'admin');
+    const tenantName = user?.tenant?.name || 'Company Admin';
+
+    const navGroups = [
+        {
+            group: 'Overview',
+            items: [
+                { label: 'Dashboard', href: '/admin/dashboard', icon: <LayoutDashboard size={16} /> },
+            ]
+        },
+        ...(isAdmin ? [{
+            group: 'Companies',
+            items: [
+                {
+                    label: 'Sister Companies', icon: <Building2 size={16} />,
+                    children: tenants.length > 0 ? tenants.map(t => ({
+                        label: t.name,
+                        href: `/admin/dashboard?company=${t.slug}`
+                    })) : [
+                        { label: 'No Companies Yet', href: '#' }
+                    ]
+                },
+            ]
+        }] : []),
+        {
+            group: 'Recruitment',
+            items: [
+                { label: 'Job Posts', href: '/admin/dashboard?tab=Jobs', icon: <Briefcase size={16} /> },
+                { label: 'Applicants', href: '/admin/dashboard?tab=Candidates', icon: <Users size={16} /> },
+                { label: 'Interview Schedule', href: '/admin/dashboard?tab=Calendar', icon: <CalendarClock size={16} /> },
+                ...(isAdmin ? [{ label: 'Hiring Plan', href: '/admin/dashboard?tab=HiringPlan', icon: <ClipboardList size={16} /> }] : []),
+            ]
+        },
+        {
+            group: 'Organization',
+            items: [
+                { label: 'Team Members', href: '/admin/dashboard?tab=Users', icon: <Users size={16} /> },
+                ...(isAdmin ? [
+                    { label: 'Site Editor', href: '/admin/contents', icon: <Globe size={16} /> },
+                    { label: 'Events', href: '/admin/dashboard?tab=Events', icon: <CalendarClock size={16} /> },
+                ] : []),
+            ]
+        },
+    ];
 
     const toggleGroup = (label: string) => {
         setExpandedGroups(prev => ({ ...prev, [label]: !prev[label] }));
@@ -94,12 +99,16 @@ export default function AdminSidebar({ user }: AdminSidebarProps) {
             {/* Header / Logo */}
             <div className="px-5 py-5 border-b border-white/5">
                 <Link href="/admin/dashboard" className="flex items-center gap-2.5 group">
-                    <div className="w-8 h-8 rounded-lg bg-[#1F7A6E] flex items-center justify-center font-black text-white text-sm shadow-lg">
-                        D
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-white text-sm shadow-lg ${isAdmin ? 'bg-[#1F7A6E]' : 'bg-blue-500'}`}>
+                        {isAdmin ? 'D' : tenantName.charAt(0)}
                     </div>
                     <div>
-                        <p className="text-white font-black text-sm tracking-tight leading-none">DROGA</p>
-                        <p className="text-[#1F7A6E] text-[9px] font-bold uppercase tracking-widest mt-0.5">Admin Panel</p>
+                        <p className="text-white font-black text-sm tracking-tight leading-none truncate max-w-[120px]">
+                            {isAdmin ? 'DROGA' : tenantName}
+                        </p>
+                        <p className={`text-[9px] font-bold uppercase tracking-widest mt-0.5 ${isAdmin ? 'text-[#1F7A6E]' : 'text-blue-400'}`}>
+                            {isAdmin ? 'Admin Panel' : 'Talent Portal'}
+                        </p>
                     </div>
                 </Link>
             </div>
@@ -183,12 +192,14 @@ export default function AdminSidebar({ user }: AdminSidebarProps) {
                 {/* User Profile */}
                 <div className="mt-2 pt-2 border-t border-white/5">
                     <div className="flex items-center gap-2.5 px-2.5 py-2">
-                        <div className="w-7 h-7 rounded-full bg-[#1F7A6E]/30 border border-[#1F7A6E]/50 flex items-center justify-center text-[11px] font-black text-[#1F7A6E] shrink-0">
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black shrink-0 ${isAdmin ? 'bg-[#1F7A6E]/30 border border-[#1F7A6E]/50 text-[#1F7A6E]' : 'bg-blue-500/30 border border-blue-500/50 text-blue-400'}`}>
                             {user?.name?.charAt(0)?.toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
                             <p className="text-white text-[11px] font-bold truncate leading-none">{user?.name}</p>
-                            <p className="text-[#1F7A6E] text-[9px] font-bold uppercase tracking-widest mt-0.5">Global Admin</p>
+                            <p className={`text-[9px] font-bold uppercase tracking-widest mt-0.5 ${isAdmin ? 'text-[#1F7A6E]' : 'text-blue-400'}`}>
+                                {user?.roles?.[0]?.name || 'Manager'}
+                            </p>
                         </div>
                     </div>
                 </div>

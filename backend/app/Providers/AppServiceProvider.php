@@ -19,6 +19,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        \Illuminate\Support\Facades\Gate::define('manageUsers', [\App\Policies\AdminPolicy::class, 'manageUsers']);
+        \Illuminate\Support\Facades\Gate::define('manageCompanies', [\App\Policies\AdminPolicy::class, 'manageCompanies']);
+        \Illuminate\Support\Facades\Gate::define('viewGlobalDashboard', [\App\Policies\AdminPolicy::class, 'viewGlobalDashboard']);
     }
 }

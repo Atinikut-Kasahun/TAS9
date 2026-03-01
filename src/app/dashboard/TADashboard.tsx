@@ -1,22 +1,26 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiFetch, API_URL } from '@/lib/api';
 
 export default function TADashboard({ user, activeTab: initialTab, onLogout }: { user: any; activeTab: string; onLogout: () => void }) {
-    const [jobs, setJobs] = useState<any[]>([]);
-    const [requisitions, setRequisitions] = useState<any[]>([]);
-    const [applicants, setApplicants] = useState<any[]>([]);
+    const [jobs, setJobs] = useState<any[] | null>(null);
+    const [requisitions, setRequisitions] = useState<any[] | null>(null);
+    const [applicants, setApplicants] = useState<any[] | null>(null);
     const [applicantsPagination, setApplicantsPagination] = useState<any>(null);
+    const [jobsPagination, setJobsPagination] = useState<any>(null);
     const [currentPage, setCurrentPage] = useState(1);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [statsLoading, setStatsLoading] = useState(false);
     const [stats, setStats] = useState<any>(null);
     const [search, setSearch] = useState(''); // live search term from URL
     const [subTab, setSubTab] = useState('NEW'); // Represents the local view/stage
     const [drawerReq, setDrawerReq] = useState<any>(null);
     const [drawerApp, setDrawerApp] = useState<any>(null);
     const [actionLoading, setActionLoading] = useState(false);
+    const router = useRouter();
     const [offerModal, setOfferModal] = useState(false);
     const [offerForm, setOfferForm] = useState({ salary: '', startDate: '', notes: '' });
     const [rejectModal, setRejectModal] = useState(false);
@@ -82,44 +86,76 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
     const fetchData = async (page = 1) => {
         setLoading(true);
         try {
+            // --- REPORTS TAB: only fetch stats, skip all other expensive calls ---
             if (initialTab === 'Reports') {
+                setStatsLoading(true);
                 const params = new URLSearchParams({
                     date_range: reportFilters.dateRange,
                     department: reportFilters.department,
-                    job_id: reportFilters.jobId
+                    job_id: reportFilters.jobId,
+                    search: search
                 });
-                const statsData = await apiFetch(`/v1/applicants/stats?${params.toString()}`);
+                const [statsData, jobsData] = await Promise.all([
+                    apiFetch(`/v1/applicants/stats?${params.toString()}`),
+                    apiFetch('/v1/jobs?page=1') // Fetch jobs for filters
+                ]);
                 setStats(statsData);
+                if (jobsData?.data) setJobs(jobsData.data);
+                else setJobs(jobsData || []);
+                setStatsLoading(false);
+                setLoading(false);
+                return; // Stop here — no need for reqs/applicants on Reports
             }
 
-            const tabToStatusMap: { [key: string]: string } = {
-                'NEW': 'new',
-                'INTERVIEWS': 'interview',
-                'OFFERS': 'offer',
-                'REJECTED': 'rejected',
-                'HIRED': 'hired',
-                'ACTIVE': 'active',
-                'ARCHIVED': 'archived',
-                'REQUISITIONS': 'ALL',
-                'OVERVIEW': 'ALL',
-            };
-
-            const currentStatus = tabToStatusMap[subTab] ?? 'ALL';
-
             if (initialTab === 'Calendar') {
+                // Calendar only needs interviews
                 const interviewsData = await apiFetch(`/v1/interviews?status=scheduled`);
                 setInterviewsList(interviewsData || []);
-                setApplicants([]); // Clear applicants
+                setApplicants([]);
                 setApplicantsPagination(null);
-            } else {
+            } else if (initialTab === 'Jobs') {
+                // Jobs tab: only fetch jobs — no applicants or requisitions needed here
                 const searchParam = search ? `&search=${encodeURIComponent(search)}` : '';
-                const [jobsData, reqsResponse, appsResponse] = await Promise.all([
-                    apiFetch(`/v1/jobs${search ? `?search=${encodeURIComponent(search)}` : ''}`),
-                    apiFetch('/v1/requisitions'),
-                    apiFetch(`/v1/applicants?page=${page}&status=${currentStatus}${searchParam}`),
-                ]);
-                setJobs(jobsData || []);
+                const jobsQuery = `/v1/jobs?page=${page}${subTab === 'ACTIVE' ? '&status=active' : '&status=archived'}${searchParam}`;
+                const jobsResponse = await apiFetch(jobsQuery);
+                if (jobsResponse?.data) {
+                    setJobs(jobsResponse.data);
+                    setJobsPagination({
+                        total: jobsResponse.total,
+                        current_page: jobsResponse.current_page,
+                        last_page: jobsResponse.last_page,
+                        from: jobsResponse.from,
+                        to: jobsResponse.to
+                    });
+                    setCurrentPage(jobsResponse.current_page);
+                } else {
+                    setJobs(jobsResponse || []);
+                    setJobsPagination(null);
+                }
+            } else if (initialTab === 'HiringPlan') {
+                // Hiring Plan: only fetch requisitions
+                const reqsResponse = await apiFetch('/v1/requisitions');
                 setRequisitions(reqsResponse?.data || []);
+            } else {
+                // Candidates, Employees, and other tabs: fetch applicants + jobs (for filter dropdowns)
+                const searchParam = search ? `&search=${encodeURIComponent(search)}` : '';
+                const currentStatus = (() => {
+                    const m: { [k: string]: string } = { 'NEW': 'new', 'INTERVIEWS': 'interview', 'OFFERS': 'offer', 'REJECTED': 'rejected', 'HIRED': 'hired', 'ACTIVE': 'active', 'ARCHIVED': 'archived', 'REQUISITIONS': 'ALL', 'OVERVIEW': 'ALL' };
+                    return m[subTab] ?? 'ALL';
+                })();
+                const statusParam = currentStatus !== 'ALL' ? `&status=${currentStatus}` : '';
+
+                const [jobsResponse, appsResponse] = await Promise.all([
+                    apiFetch(`/v1/jobs?page=1`),
+                    apiFetch(`/v1/applicants?page=${page}${statusParam}${searchParam}`),
+                ]);
+
+                if (jobsResponse?.data) {
+                    setJobs(jobsResponse.data);
+                    setJobsPagination(null);
+                } else {
+                    setJobs(jobsResponse || []);
+                }
 
                 if (appsResponse?.data) {
                     setApplicants(appsResponse.data);
@@ -146,9 +182,16 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
 
     useEffect(() => {
         fetchData(1);
-    }, [subTab, initialTab, search]); // Re-fetch when tab, globalTab, or search changes
+    }, [subTab, search]); // Re-fetch when subtab or search changes
 
     useEffect(() => {
+        // Reset loading and clear data when tab changes to prevent "No Results" flicker
+        setLoading(true);
+        setJobs(null);
+        setApplicants(null);
+        setRequisitions(null);
+        setStats(null);
+
         // Default sub-tab when global category changes
         if (initialTab === 'Candidates') setSubTab('NEW');
         else if (initialTab === 'Jobs') setSubTab('ACTIVE');
@@ -156,7 +199,10 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
         else if (initialTab === 'HiringPlan') setSubTab('REQUISITIONS');
         else if (initialTab === 'Reports') setSubTab('OVERVIEW');
         else if (initialTab === 'Calendar') setSubTab('UPCOMING');
-    }, [initialTab]);
+
+        // Also handles initial load when switching to any other tab
+        fetchData(1);
+    }, [initialTab]); // Only fires when switching the main tab
 
 
     const handlePostJob = async (req: any) => {
@@ -169,7 +215,7 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                     job_requisition_id: req.id,
                     title: req.title,
                     description: req.description || `New opening for ${req.title} in ${req.department} department.`,
-                    location: 'Addis Ababa',
+                    location: req.location,
                     type: 'full-time',
                 }),
             });
@@ -387,7 +433,7 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                             <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
                                 <span className="hover:text-[#1F7A6E] cursor-pointer transition-colors">Sister Companies</span>
                                 <svg className="w-2.5 h-2.5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
-                                <span className="text-[#1F7A6E]">Droga Pharma</span>
+                                <span className="text-[#1F7A6E]">{user.tenant?.name || 'Droga Pharma'}</span>
                                 <svg className="w-2.5 h-2.5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
                                 <span>{tabLabels[initialTab] || initialTab}</span>
                                 {subLabels[subTab] && (
@@ -400,38 +446,65 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                         );
                     })()}
 
-                    <h1 className="text-[32px] font-bold text-[#1A2B3D] tracking-tight">Droga Pharma</h1>
+                    <h1 className="text-[32px] font-bold text-[#1A2B3D] tracking-tight">{user.tenant?.name || 'Droga Pharma'}</h1>
 
                     {/* Hierarchical Sub Tabs - Contextual Logic */}
                     <div className="flex gap-10 border-b border-gray-100 mt-2">
                         {(() => {
                             let items: string[] = [];
                             if (initialTab === 'Candidates') items = ['NEW', 'INTERVIEWS', 'OFFERS', 'REJECTED'];
-                            else if (initialTab === 'Jobs') items = ['ACTIVE', 'ARCHIVED'];
-                            else if (initialTab === 'HiringPlan') items = ['REQUISITIONS'];
+                            else if (initialTab === 'Jobs' || initialTab === 'HiringPlan') items = ['JOBS', 'HIRING PLAN'];
                             else if (initialTab === 'Employees') items = ['HIRED'];
                             else if (initialTab === 'Reports') items = ['OVERVIEW'];
                             else items = ['OVERVIEW'];
 
-                            return items.map((t) => (
-                                <button
-                                    key={t}
-                                    onClick={() => { setSubTab(t); setCurrentPage(1); }}
-                                    className={`pb-4 text-[12px] font-black tracking-[0.15em] transition-all relative ${subTab === t
-                                        ? 'text-[#1F7A6E]'
-                                        : 'text-gray-400 hover:text-gray-600'
-                                        }`}
-                                >
-                                    <span className="uppercase">{t}</span>
-                                    {subTab === t && (
-                                        <motion.div
-                                            layoutId="activeSubTabIndicator"
-                                            className="absolute bottom-0 left-0 right-0 h-[4px] bg-[#1F7A6E] rounded-t-full"
-                                        />
-                                    )}
-                                </button>
-                            ));
+                            return items.map((t) => {
+                                const isSectionActive = (t === 'JOBS' && initialTab === 'Jobs') || (t === 'HIRING PLAN' && initialTab === 'HiringPlan');
+                                const isSubActive = subTab === t;
+                                const isActive = isSectionActive || isSubActive;
+                                return (
+                                    <button
+                                        key={t}
+                                        onClick={() => {
+                                            if (t === 'JOBS' && initialTab !== 'Jobs') {
+                                                router.push('/dashboard?tab=Jobs');
+                                            } else if (t === 'HIRING PLAN' && initialTab !== 'HiringPlan') {
+                                                router.push('/dashboard?tab=HiringPlan');
+                                            } else if (t !== 'JOBS' && t !== 'HIRING PLAN') {
+                                                setSubTab(t);
+                                                setCurrentPage(1);
+                                            }
+                                        }}
+                                        className={`pb-4 text-[12px] font-black tracking-[0.15em] transition-all relative ${isActive
+                                            ? 'text-[#1F7A6E]'
+                                            : 'text-gray-400 hover:text-gray-600'
+                                            }`}
+                                    >
+                                        <span className="uppercase">{t}</span>
+                                        {isActive && (
+                                            <motion.div
+                                                layoutId="activeSubTabIndicator"
+                                                className="absolute bottom-0 left-0 right-0 h-[4px] bg-[#1F7A6E] rounded-t-full"
+                                            />
+                                        )}
+                                    </button>
+                                );
+                            });
                         })()}
+
+                        {(initialTab === 'Jobs' || initialTab === 'HiringPlan') && (
+                            <div className="flex gap-6 ml-4 border-l border-gray-100 pl-10 h-6 self-start mt-0.5 items-center">
+                                {(initialTab === 'Jobs' ? ['ACTIVE', 'ARCHIVED'] : ['REQUISITIONS']).map(f => (
+                                    <button
+                                        key={f}
+                                        onClick={() => { setSubTab(f); setCurrentPage(1); }}
+                                        className={`text-[10px] font-black tracking-widest transition-all ${subTab === f ? 'text-[#1A2B3D]' : 'text-gray-400 hover:text-gray-600'}`}
+                                    >
+                                        {f}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -444,12 +517,9 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
 
             {/* Content Table */}
             {loading ? (
-                <div className="bg-white rounded border border-gray-100 p-20 flex items-center justify-center">
-                    <div className="w-8 h-8 border-4 border-[#1F7A6E] border-t-transparent rounded-full animate-spin" />
-                </div>
-            ) : (
-                <div className="bg-white rounded border border-gray-100 shadow-sm overflow-hidden min-h-[400px]">
-                    {initialTab === 'Jobs' && (
+                initialTab === 'Jobs' ? (
+                    /* Jobs skeleton */
+                    <div className="bg-white rounded border border-gray-100 shadow-sm overflow-hidden">
                         <table className="w-full text-left">
                             <thead className="bg-[#F9FAFB] border-b border-gray-100">
                                 <tr>
@@ -458,574 +528,602 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                     ))}
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-50">
-                                {jobs
-                                    .filter((j: any) => subTab === 'ACTIVE' ? j.status === 'active' : (j.status === 'archived' || j.status === 'closed'))
-                                    .length === 0 ? (
-                                    <tr><td colSpan={5} className="px-8 py-20 text-center text-gray-400 italic text-sm">No {subTab.toLowerCase()} jobs found.</td></tr>
-                                ) : jobs
-                                    .filter((j: any) => subTab === 'ACTIVE' ? j.status === 'active' : (j.status === 'archived' || j.status === 'closed'))
-                                    .map((job: any) => (
-                                        <tr key={job.id} className="hover:bg-gray-50 transition-colors cursor-pointer group">
-                                            <td className="px-8 py-6">
-                                                <p className="font-bold text-[#1A2B3D] group-hover:text-[#1F7A6E] transition-colors">{job.title}</p>
-                                            </td>
-                                            <td className="px-8 py-6 text-sm text-gray-500">{job.location || 'Addis Ababa'}</td>
-                                            <td className="px-8 py-6 text-sm text-gray-500">
-                                                {job.department || job.requisition?.department || 'General'}
-                                            </td>
-                                            <td className="px-8 py-6">
-                                                <span className={`px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest ${job.status === 'active' ? 'bg-emerald-50 text-emerald-600' : job.status === 'closed' ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-400'}`}>
-                                                    {job.status}
-                                                </span>
-                                            </td>
-                                            <td className="px-8 py-6">
-                                                {job.status === 'active' ? (
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); handleToggleJobStatus(job.id, 'closed'); }}
-                                                        className="px-4 py-2 border border-red-200 text-red-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-red-50 transition-all"
-                                                    >
-                                                        Close Job
-                                                    </button>
-                                                ) : job.status === 'closed' ? (
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); handleToggleJobStatus(job.id, 'active'); }}
-                                                        className="px-4 py-2 border border-emerald-200 text-emerald-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-emerald-50 transition-all"
-                                                    >
-                                                        Re-open
-                                                    </button>
-                                                ) : null}
-                                            </td>
-                                        </tr>
-                                    ))}
+                            <tbody className="divide-y divide-gray-50 animate-pulse">
+                                {[...Array(6)].map((_, i) => (
+                                    <tr key={i}>
+                                        <td className="px-8 py-5">
+                                            <div className="h-3.5 bg-gray-100 rounded w-40 mb-1.5" />
+                                            <div className="h-2.5 bg-gray-100 rounded w-24" />
+                                        </td>
+                                        <td className="px-8 py-5"><div className="h-3 bg-gray-100 rounded w-28" /></td>
+                                        <td className="px-8 py-5"><div className="h-3 bg-gray-100 rounded w-32" /></td>
+                                        <td className="px-8 py-5"><div className="h-6 bg-gray-100 rounded-full w-16" /></td>
+                                        <td className="px-8 py-5"><div className="h-3 bg-gray-100 rounded w-20" /></td>
+                                    </tr>
+                                ))}
                             </tbody>
                         </table>
-                    )}
-
-                    {(['Candidates', 'Employees'].includes(initialTab)) && (
-                        <div className="flex flex-col">
-                            {/* Header Section without inner filters */}
-                            <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-white">
-                                <div className="space-y-1">
-                                    <h2 className="text-2xl font-black text-[#1A2B3D] flex items-center gap-3">
-                                        <div className="w-2 h-8 bg-[#1F7A6E] rounded-full" />
-                                        {subTab} PIPELINE
-                                    </h2>
-                                    <p className="text-xs font-medium text-gray-400">Manage talent through the {subTab.toLowerCase()} stage</p>
-                                </div>
-                                <div className="flex items-center gap-4">
-                                    <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 px-4 py-2 rounded-full border border-gray-100">
-                                        Total: <span className="text-[#1A2B3D]">{applicantsPagination?.total || 0}</span>
-                                    </p>
-                                </div>
-                            </div>
-
-                            <table className="w-full text-left">
-                                <thead className="bg-[#F9FAFB] border-b border-gray-100">
-                                    <tr>
-                                        {initialTab === 'Employees'
-                                            ? ['CANDIDATE', 'APPLIED FOR', 'DEPARTMENT', 'EXPERIENCE', 'MATCHING', 'STATUS', 'APPLIED ON', 'HIRED ON'].map(h => (
-                                                <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
-                                            ))
-                                            : ['CANDIDATE', 'APPLIED FOR', 'DEPARTMENT', 'EXPERIENCE', 'MATCHING', 'STATUS', 'APPLIED ON'].map(h => (
-                                                <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
-                                            ))}
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-50">
-                                    {applicants.length === 0 ? (
-                                        <tr><td colSpan={5} className="px-8 py-20 text-center text-gray-400 italic text-sm">No candidates in this stage.</td></tr>
-                                    ) : (
-                                        applicants.map((app: any) => (
-                                            <tr
-                                                key={app.id}
-                                                className="hover:bg-gray-50 transition-colors group cursor-pointer"
-                                                onClick={() => setDrawerApp(app)}
-                                            >
-                                                <td className="px-8 py-6">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center overflow-hidden border border-gray-100 group-hover:border-[#1F7A6E] transition-all">
-                                                            {app.photo_path ? (
-                                                                <img
-                                                                    src={app.photo_path.startsWith('http') ? app.photo_path : `${API_URL.replace('/api', '/storage')}/${app.photo_path}`}
-                                                                    alt=""
-                                                                    className="w-full h-full object-cover"
-                                                                    onError={(e) => {
-                                                                        (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(app.name)}&background=random`;
-                                                                    }}
-                                                                />
-                                                            ) : (
-                                                                <span className="text-xs font-black text-gray-400">{app.name.charAt(0)}</span>
-                                                            )}
-                                                        </div>
-                                                        <div>
-                                                            <p className="font-black text-[13px] text-[#1A2B3D]">{app.name}</p>
-                                                            <p className="text-[11px] text-gray-400 mt-0.5">{app.email}</p>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="px-8 py-6 text-[13px] text-gray-600 font-medium">
-                                                    {app.job_posting?.title || 'Open Role'}
-                                                </td>
-                                                <td className="px-8 py-6 text-[13px] text-gray-600 font-medium">
-                                                    {app.job_posting?.department || app.job_posting?.requisition?.department || '-'}
-                                                </td>
-                                                <td className="px-8 py-6 text-[13px] text-gray-600">
-                                                    {app.years_of_experience || '0'} Years
-                                                </td>
-                                                <td className="px-8 py-6">
-                                                    <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                                        <div className="h-full bg-[#1F7A6E]" style={{ width: `${app.match_score || 75}%` }} />
-                                                    </div>
-                                                    <p className="text-[10px] font-black text-[#1F7A6E] mt-1 uppercase">{app.match_score || 75}% Match</p>
-                                                </td>
-                                                <td className="px-8 py-6">
-                                                    {app.status === 'interview' && app.interviews && app.interviews.length > 0 ? (
-                                                        <span className="px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest bg-purple-50 text-purple-600">
-                                                            Scheduled: {(() => {
-                                                                const d = new Date(app.interviews[0].scheduled_at);
-                                                                return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
-                                                            })()}
-                                                        </span>
-                                                    ) : (
-                                                        <span className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest ${app.status === 'hired' ? 'bg-emerald-50 text-emerald-600' :
-                                                            app.status === 'rejected' ? 'bg-red-50 text-red-600' :
-                                                                app.status === 'interview' ? 'bg-purple-50 text-purple-600' :
-                                                                    app.status === 'offer' ? 'bg-amber-50 text-amber-600' :
-                                                                        'bg-blue-50 text-blue-600'
-                                                            }`}>
-                                                            {app.status}
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="px-8 py-6">
-                                                    {app.created_at ? (() => {
-                                                        const d = new Date(app.created_at);
-                                                        const now = new Date();
-                                                        const diffDays = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
-                                                        const relative = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Yesterday' : `${diffDays}d ago`;
-                                                        return (
-                                                            <div>
-                                                                <p className="text-[12px] font-bold text-[#1A2B3D]">
-                                                                    {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                                                </p>
-                                                                <p className="text-[11px] text-gray-400 mt-0.5">
-                                                                    {d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · <span className="text-[#1F7A6E] font-black">{relative}</span>
-                                                                </p>
-                                                            </div>
-                                                        );
-                                                    })() : <span className="text-gray-300 text-xs">—</span>}
-                                                </td>
-                                                {initialTab === 'Employees' && (
-                                                    <td className="px-8 py-6">
-                                                        {app.updated_at ? (() => {
-                                                            const d = new Date(app.updated_at);
-                                                            const now = new Date();
-                                                            const diffDays = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
-                                                            const relative = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Yesterday' : `${diffDays}d ago`;
-                                                            return (
-                                                                <div>
-                                                                    <p className="text-[12px] font-bold text-[#1A2B3D]">
-                                                                        {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                                                    </p>
-                                                                    <p className="text-[11px] text-gray-400 mt-0.5">
-                                                                        {d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · <span className="text-[#1F7A6E] font-black">{relative}</span>
-                                                                    </p>
-                                                                </div>
-                                                            );
-                                                        })() : <span className="text-gray-300 text-xs">—</span>}
-                                                    </td>
-                                                )}
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-
-                            {/* Pagination Controls */}
-                            {applicantsPagination && applicantsPagination.last_page > 1 && (
-                                <div className="px-8 py-4 bg-gray-50/50 border-t border-gray-100 flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest">
-                                            Showing <span className="text-[#1A2B3D]">{applicantsPagination.from}</span> - <span className="text-[#1A2B3D]">{applicantsPagination.to}</span> of <span className="text-[#1A2B3D]">{applicantsPagination.total}</span>
-                                        </p>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            onClick={() => fetchData(currentPage - 1)}
-                                            disabled={currentPage === 1}
-                                            className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-[#1F7A6E] hover:border-[#1F7A6E] transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
-                                        >
-                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
-                                        </button>
-
-                                        {[...Array(applicantsPagination.last_page)].map((_, i) => (
+                    </div>
+                ) : (
+                    <div className="bg-white rounded border border-gray-100 p-20 flex items-center justify-center">
+                        <div className="w-8 h-8 border-4 border-[#1F7A6E] border-t-transparent rounded-full animate-spin" />
+                    </div>
+                )
+            ) : initialTab === 'Jobs' ? (
+                <div className="bg-white rounded border border-gray-100 shadow-sm overflow-hidden min-h-[400px]">
+                    <table className="w-full text-left">
+                        <thead className="bg-[#F9FAFB] border-b border-gray-100">
+                            <tr>
+                                {['POSITION', 'LOCATION', 'DEPARTMENT', 'STATUS', 'ACTIONS'].map(h => (
+                                    <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                            {jobs === null ? null : jobs.length === 0 ? (
+                                <tr><td colSpan={5} className="px-8 py-20 text-center text-gray-400 italic text-sm">No {subTab.toLowerCase()} jobs found for {user.tenant?.name || 'this company'}.</td></tr>
+                            ) : jobs.map((job: any) => (
+                                <tr key={job.id} className="hover:bg-gray-50 transition-colors cursor-pointer group">
+                                    <td className="px-8 py-6">
+                                        <p className="font-bold text-[#1A2B3D] group-hover:text-[#1F7A6E] transition-colors">{job.title}</p>
+                                    </td>
+                                    <td className="px-8 py-6 text-sm text-gray-500">{job.location || '—'}</td>
+                                    <td className="px-8 py-6 text-sm text-gray-500">
+                                        {job.department || job.requisition?.department || 'General'}
+                                    </td>
+                                    <td className="px-8 py-6">
+                                        <span className={`px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest ${job.status === 'active' ? 'bg-emerald-50 text-emerald-600' : job.status === 'closed' ? 'bg-red-50 text-red-600' : 'bg-gray-100 text-gray-400'}`}>
+                                            {job.status}
+                                        </span>
+                                    </td>
+                                    <td className="px-8 py-6">
+                                        {job.status === 'active' ? (
                                             <button
-                                                key={i + 1}
-                                                onClick={() => fetchData(i + 1)}
-                                                className={`w-10 h-10 rounded-xl text-[11px] font-black transition-all shadow-sm border ${currentPage === i + 1
-                                                    ? 'bg-[#1F7A6E] text-white border-[#1F7A6E]'
-                                                    : 'bg-white text-gray-400 border-gray-200 hover:border-[#1F7A6E] hover:text-[#1F7A6E]'
-                                                    }`}
+                                                onClick={(e) => { e.stopPropagation(); handleToggleJobStatus(job.id, 'closed'); }}
+                                                className="px-4 py-2 border border-red-200 text-red-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-red-50 transition-all"
                                             >
-                                                {i + 1}
+                                                Close Job
                                             </button>
-                                        ))}
+                                        ) : job.status === 'closed' ? (
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleToggleJobStatus(job.id, 'active'); }}
+                                                className="px-4 py-2 border border-emerald-200 text-emerald-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-emerald-50 transition-all"
+                                            >
+                                                Re-open
+                                            </button>
+                                        ) : null}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
 
+                    {/* Jobs Pagination Controls */}
+                    {jobsPagination && jobsPagination.last_page > 1 && (
+                        <div className="px-8 py-4 bg-gray-50/50 border-t border-gray-100 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest">
+                                    Showing <span className="text-[#1A2B3D]">{jobsPagination.from}</span> - <span className="text-[#1A2B3D]">{jobsPagination.to}</span> of <span className="text-[#1A2B3D]">{jobsPagination.total}</span>
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => fetchData(currentPage - 1)}
+                                    disabled={currentPage === 1}
+                                    className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-[#1F7A6E] hover:border-[#1F7A6E] transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+                                </button>
+
+                                {Array.from({ length: Math.min(5, jobsPagination.last_page) }, (_, i) => {
+                                    let pageNum = currentPage <= 3 ? i + 1 : currentPage + i - 2;
+                                    if (pageNum > jobsPagination.last_page) pageNum = jobsPagination.last_page - (4 - i);
+                                    if (pageNum < 1) pageNum = i + 1;
+                                    if (pageNum > jobsPagination.last_page) return null;
+
+                                    return (
                                         <button
-                                            onClick={() => fetchData(currentPage + 1)}
-                                            disabled={currentPage === applicantsPagination.last_page}
-                                            className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-[#1F7A6E] hover:border-[#1F7A6E] transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+                                            key={pageNum}
+                                            onClick={() => fetchData(pageNum)}
+                                            className={`w-10 h-10 rounded-xl text-[11px] font-black transition-all shadow-sm border ${currentPage === pageNum
+                                                ? 'bg-[#1F7A6E] text-white border-[#1F7A6E]'
+                                                : 'bg-white text-gray-400 border-gray-200 hover:border-[#1F7A6E] hover:text-[#1F7A6E]'
+                                                }`}
                                         >
-                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
+                                            {pageNum}
                                         </button>
-                                    </div>
-                                </div>
-                            )
-                            }
-                        </div >
+                                    );
+                                })}
+
+                                <button
+                                    onClick={() => fetchData(currentPage + 1)}
+                                    disabled={currentPage === jobsPagination.last_page}
+                                    className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-[#1F7A6E] hover:border-[#1F7A6E] transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            ) : null}
+
+            {(['Candidates', 'Employees'].includes(initialTab)) && (
+                <div className="flex flex-col">
+                    {/* Header Section without inner filters */}
+                    <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-white">
+                        <div className="space-y-1">
+                            <h2 className="text-2xl font-black text-[#1A2B3D] flex items-center gap-3">
+                                <div className="w-2 h-8 bg-[#1F7A6E] rounded-full" />
+                                {subTab} PIPELINE
+                            </h2>
+                            <p className="text-xs font-medium text-gray-400">Manage talent through the {subTab.toLowerCase()} stage</p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 px-4 py-2 rounded-full border border-gray-100">
+                                Total: <span className="text-[#1A2B3D]">{applicantsPagination?.total || 0}</span>
+                            </p>
+                        </div>
+                    </div>
+
+                    <table className="w-full text-left">
+                        <thead className="bg-[#F9FAFB] border-b border-gray-100">
+                            <tr>
+                                {initialTab === 'Employees'
+                                    ? ['CANDIDATE', 'ROLE', 'DEPARTMENT', 'EXPERIENCE', 'STATUS', 'APPLIED ON', 'HIRED ON'].map(h => (
+                                        <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
+                                    ))
+                                    : ['CANDIDATE', 'APPLIED FOR', 'DEPARTMENT', 'EXPERIENCE', 'MATCHING', 'STATUS', 'APPLIED ON'].map(h => (
+                                        <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
+                                    ))}
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                            {applicants === null ? null : applicants.length === 0 ? (
+                                <tr><td colSpan={7} className="px-8 py-20 text-center text-gray-400 italic text-sm">No {subTab.toLowerCase()} talent currently in the pipeline for {user.tenant?.name || 'this company'}.</td></tr>
+                            ) : (
+                                applicants.map((app: any) => (
+                                    <tr
+                                        key={app.id}
+                                        className="hover:bg-gray-50 transition-colors group cursor-pointer"
+                                        onClick={() => setDrawerApp(app)}
+                                    >
+                                        <td className="px-8 py-6">
+                                            <div className="flex items-center gap-4">
+                                                <div className="relative group/avatar">
+                                                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center overflow-hidden border border-gray-100 group-hover:border-[#1F7A6E] transition-all duration-300 shadow-sm">
+                                                        {app.photo_path ? (
+                                                            <img
+                                                                src={app.photo_path.startsWith('http') ? app.photo_path : `${API_URL.replace('/api', '/storage')}/${app.photo_path}`}
+                                                                alt=""
+                                                                className="w-full h-full object-cover transition-transform duration-500 group-hover/avatar:scale-110"
+                                                                onError={(e) => {
+                                                                    (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(app.name)}&background=1F7A6E&color=fff&bold=true`;
+                                                                }}
+                                                            />
+                                                        ) : (
+                                                            <span className="text-sm font-black text-[#1F7A6E]">{app.name.split(' ').map((n: string) => n[0]).join('')}</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white bg-emerald-500 shadow-sm" />
+                                                </div>
+                                                <div className="space-y-0.5">
+                                                    <p className="font-black text-[14px] text-[#1A2B3D] tracking-tight group-hover:text-[#1F7A6E] transition-colors">{app.name}</p>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{app.email}</span>
+                                                        <span className="w-1 h-1 rounded-full bg-gray-200" />
+                                                        <span className="text-[10px] font-bold text-[#1F7A6E] uppercase tracking-widest">{app.phone || 'No Phone'}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-8 py-6">
+                                            <p className="text-[13px] font-bold text-[#1A2B3D]">{app.job_posting?.title || 'Open Role'}</p>
+                                            <p className="text-[10px] font-medium text-gray-400 uppercase tracking-widest mt-0.5">Reference: REQ{app.job_posting?.job_requisition_id || '---'}</p>
+                                        </td>
+                                        <td className="px-8 py-6 text-[13px] text-gray-600 font-medium">
+                                            {app.job_posting?.department || app.job_posting?.requisition?.department || '-'}
+                                        </td>
+                                        <td className="px-8 py-6 text-[13px] text-gray-600">
+                                            {app.years_of_experience || '0'} Years
+                                        </td>
+                                        {initialTab !== 'Employees' && (
+                                            <td className="px-8 py-6">
+                                                <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                                    <div className="h-full bg-[#1F7A6E]" style={{ width: `${app.match_score || 75}%` }} />
+                                                </div>
+                                                <p className="text-[10px] font-black text-[#1F7A6E] mt-1 uppercase">{app.match_score || 75}% Match</p>
+                                            </td>
+                                        )}
+                                        <td className="px-8 py-6">
+                                            {app.status === 'interview' && app.interviews && app.interviews.length > 0 ? (
+                                                <span className="px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest bg-purple-50 text-purple-600">
+                                                    Scheduled: {(() => {
+                                                        const d = new Date(app.interviews[0].scheduled_at);
+                                                        return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+                                                    })()}
+                                                </span>
+                                            ) : (
+                                                <span className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-widest ${app.status === 'hired' ? 'bg-emerald-50 text-emerald-600' :
+                                                    app.status === 'rejected' ? 'bg-red-50 text-red-600' :
+                                                        app.status === 'interview' ? 'bg-purple-50 text-purple-600' :
+                                                            app.status === 'offer' ? 'bg-amber-50 text-amber-600' :
+                                                                'bg-blue-50 text-blue-600'
+                                                    }`}>
+                                                    {app.status}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-8 py-6">
+                                            {app.created_at ? (() => {
+                                                const d = new Date(app.created_at);
+                                                const now = new Date();
+                                                const diffDays = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
+                                                const relative = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Yesterday' : `${diffDays}d ago`;
+                                                return (
+                                                    <div>
+                                                        <p className="text-[12px] font-bold text-[#1A2B3D]">
+                                                            {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                        </p>
+                                                        <p className="text-[11px] text-gray-400 mt-0.5">
+                                                            {d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · <span className="text-[#1F7A6E] font-black">{relative}</span>
+                                                        </p>
+                                                    </div>
+                                                );
+                                            })() : <span className="text-gray-300 text-xs">—</span>}
+                                        </td>
+                                        {initialTab === 'Employees' && (
+                                            <td className="px-8 py-6">
+                                                {app.updated_at ? (() => {
+                                                    const d = new Date(app.updated_at);
+                                                    const now = new Date();
+                                                    const diffDays = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
+                                                    const relative = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Yesterday' : `${diffDays}d ago`;
+                                                    return (
+                                                        <div>
+                                                            <p className="text-[12px] font-bold text-[#1A2B3D]">
+                                                                {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                            </p>
+                                                            <p className="text-[11px] text-gray-400 mt-0.5">
+                                                                {d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} · <span className="text-[#1F7A6E] font-black">{relative}</span>
+                                                            </p>
+                                                        </div>
+                                                    );
+                                                })() : <span className="text-gray-300 text-xs">—</span>}
+                                            </td>
+                                        )}
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+
+                    {/* Pagination Controls */}
+                    {applicantsPagination && applicantsPagination.last_page > 1 && (
+                        <div className="px-8 py-4 bg-gray-50/50 border-t border-gray-100 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest">
+                                    Showing <span className="text-[#1A2B3D]">{applicantsPagination.from}</span> - <span className="text-[#1A2B3D]">{applicantsPagination.to}</span> of <span className="text-[#1A2B3D]">{applicantsPagination.total}</span>
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => fetchData(currentPage - 1)}
+                                    disabled={currentPage === 1}
+                                    className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-[#1F7A6E] hover:border-[#1F7A6E] transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+                                </button>
+
+                                {[...Array(applicantsPagination.last_page)].map((_, i) => (
+                                    <button
+                                        key={i + 1}
+                                        onClick={() => fetchData(i + 1)}
+                                        className={`w-10 h-10 rounded-xl text-[11px] font-black transition-all shadow-sm border ${currentPage === i + 1
+                                            ? 'bg-[#1F7A6E] text-white border-[#1F7A6E]'
+                                            : 'bg-white text-gray-400 border-gray-200 hover:border-[#1F7A6E] hover:text-[#1F7A6E]'
+                                            }`}
+                                    >
+                                        {i + 1}
+                                    </button>
+                                ))}
+
+                                <button
+                                    onClick={() => fetchData(currentPage + 1)}
+                                    disabled={currentPage === applicantsPagination.last_page}
+                                    className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-[#1F7A6E] hover:border-[#1F7A6E] transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
+                                </button>
+                            </div>
+                        </div>
                     )
                     }
+                </div >
+            )
+            }
 
-                    {
-                        initialTab === 'Employees' && (
-                            <div className="flex flex-col">
-                                <table className="w-full text-left">
-                                    <thead className="bg-[#F9FAFB] border-b border-gray-100">
-                                        <tr>
-                                            {['EMPLOYEE', 'ROLE', 'DEPARTMENT', 'JOINED DATE'].map(h => (
-                                                <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-50">
-                                        {applicants.length === 0 ? (
-                                            <tr><td colSpan={4} className="px-8 py-20 text-center text-gray-400 italic text-sm">No hired employees yet.</td></tr>
-                                        ) : applicants.map((app: any) => (
-                                            <tr key={app.id} className="hover:bg-gray-50 transition-colors cursor-pointer group" onClick={() => setDrawerApp(app)}>
-                                                <td className="px-8 py-6">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center overflow-hidden border border-gray-100 group-hover:border-[#1F7A6E] transition-all">
-                                                            {app.photo_path ? (
-                                                                <img src={`${API_URL.replace('/api', '/storage')}/${app.photo_path}`} alt="" className="w-full h-full object-cover" />
-                                                            ) : (
-                                                                <span className="text-xs font-black text-gray-400">{app.name.charAt(0)}</span>
-                                                            )}
-                                                        </div>
-                                                        <div>
-                                                            <p className="font-black text-[13px] text-[#1A2B3D]">{app.name}</p>
-                                                            <p className="text-[11px] text-gray-400 mt-0.5">{app.email}</p>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="px-8 py-6 text-[13px] text-gray-600 font-medium">{app.job_posting?.title || 'Team Member'}</td>
-                                                <td className="px-8 py-6 text-[13px] text-gray-600">{app.job_posting?.department || 'Operations'}</td>
-                                                <td className="px-8 py-6 text-[13px] text-gray-600">{new Date(app.updated_at).toLocaleDateString()}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                                {/* Pagination for Employees */}
-                                {applicantsPagination && applicantsPagination.last_page > 1 && (
-                                    <div className="px-8 py-4 bg-gray-50/50 border-t border-gray-100 flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest">
-                                                Exhibiting <span className="text-[#1A2B3D]">{applicantsPagination.from}</span> - <span className="text-[#1A2B3D]">{applicantsPagination.to}</span> of <span className="text-[#1A2B3D]">{applicantsPagination.total}</span> Talent
-                                            </p>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <button onClick={() => fetchData(currentPage - 1)} disabled={currentPage === 1} className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-[#1F7A6E] hover:border-[#1F7A6E] transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-sm">
-                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
-                                            </button>
-                                            {[...Array(applicantsPagination.last_page)].map((_, i) => (
-                                                <button key={i + 1} onClick={() => fetchData(i + 1)} className={`w-10 h-10 rounded-xl text-[11px] font-black transition-all shadow-sm border ${currentPage === i + 1 ? 'bg-[#1F7A6E] text-white border-[#1F7A6E]' : 'bg-white text-gray-400 border-gray-200 hover:border-[#1F7A6E] hover:text-[#1F7A6E]'}`}>
-                                                    {i + 1}
-                                                </button>
-                                            ))}
-                                            <button onClick={() => fetchData(currentPage + 1)} disabled={currentPage === applicantsPagination.last_page} className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-[#1F7A6E] hover:border-[#1F7A6E] transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-sm">
-                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )
-                    }
-
-                    {
-                        initialTab === 'HiringPlan' && (
-                            <table className="w-full text-left">
-                                <thead className="bg-[#F9FAFB] border-b border-gray-100">
-                                    <tr>
-                                        {['REQUISITION', 'HIRING MANAGER', 'REQUISITION OWNER', 'SALARY', 'PLAN DATE', 'STATUS'].map(h => (
-                                            <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-50">
-                                    {requisitions.length === 0 ? (
-                                        <tr><td colSpan={6} className="px-8 py-20 text-center text-gray-400 italic text-sm">No hiring plan items yet.</td></tr>
-                                    ) : requisitions.map((req: any) => (
-                                        <tr
-                                            key={req.id}
-                                            className="hover:bg-gray-50 transition-colors group cursor-pointer"
-                                            onClick={() => setDrawerReq(req)}
-                                        >
-                                            <td className="px-8 py-6">
-                                                <p className="font-black text-[13px] text-[#0066CC] hover:underline group-hover:text-[#1F7A6E]">
-                                                    REQ{req.id} {req.title}
-                                                </p>
-                                                <p className="text-[11px] text-gray-400 mt-0.5 tracking-tight">
-                                                    {req.department} · {req.tenant?.name || 'Droga Pharma'}
-                                                </p>
-                                            </td>
-                                            <td className="px-8 py-6 text-[13px] text-gray-600">
-                                                {req.requester?.name || 'Hiring Manager'}
-                                            </td>
-                                            <td className="px-8 py-6 text-[13px] text-gray-600">
-                                                {req.location || 'Addis Ababa'}
-                                            </td>
-                                            <td className="px-8 py-6 text-[13px] text-[#1A2B3D] font-black">
-                                                ${req.budget ? (req.budget / 1000).toFixed(0) + 'k' : '45k'} /yr
-                                            </td>
-                                            <td className="px-8 py-6 text-[13px] text-gray-600">
-                                                {new Date(req.created_at).toLocaleDateString()}
-                                            </td>
-                                            <td className="px-8 py-6">
-                                                <span className={`px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest ${req.status === 'approved' ? 'bg-emerald-50 text-emerald-600' :
-                                                    req.status === 'pending' ? 'bg-amber-50 text-amber-600' :
-                                                        'bg-red-50 text-red-500'
-                                                    }`}>
-                                                    {req.status}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        )
-                    }
-
-                    {
-                        initialTab === 'Calendar' && (
-                            <div className="flex flex-col">
-                                <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-white">
-                                    <div className="space-y-1">
-                                        <h2 className="text-2xl font-black text-[#1A2B3D] flex items-center gap-3">
-                                            <div className="w-2 h-8 bg-[#1F7A6E] rounded-full" />
-                                            INTERVIEW CALENDAR
-                                        </h2>
-                                        <p className="text-xs font-medium text-gray-400">Manage and view all upcoming scheduled interviews</p>
-                                    </div>
-                                    <div className="flex items-center gap-4">
-                                        <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 px-4 py-2 rounded-full border border-gray-100">
-                                            Upcoming: <span className="text-[#1A2B3D]">{interviewsList.length}</span>
+            {
+                initialTab === 'HiringPlan' && (
+                    <table className="w-full text-left">
+                        <thead className="bg-[#F9FAFB] border-b border-gray-100">
+                            <tr>
+                                {['REQUISITION', 'HIRING MANAGER', 'REQUISITION OWNER', 'SALARY', 'PLAN DATE', 'STATUS'].map(h => (
+                                    <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                            {requisitions === null ? null : requisitions.length === 0 ? (
+                                <tr><td colSpan={6} className="px-8 py-20 text-center text-gray-400 italic text-sm">No hiring plan items yet for {user.tenant?.name || 'this company'}.</td></tr>
+                            ) : requisitions.map((req: any) => (
+                                <tr
+                                    key={req.id}
+                                    className="hover:bg-gray-50 transition-colors group cursor-pointer"
+                                    onClick={() => setDrawerReq(req)}
+                                >
+                                    <td className="px-8 py-6">
+                                        <p className="font-black text-[13px] text-[#0066CC] hover:underline group-hover:text-[#1F7A6E]">
+                                            REQ{req.id} {req.title}
                                         </p>
-                                    </div>
-                                </div>
-                                <table className="w-full text-left">
-                                    <thead className="bg-[#F9FAFB] border-b border-gray-100">
-                                        <tr>
-                                            {['CANDIDATE', 'CONTACT', 'INTERVIEW DATE & TIME', 'TYPE', 'STATUS'].map(h => (
-                                                <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-50">
-                                        {interviewsList.length === 0 ? (
-                                            <tr><td colSpan={5} className="px-8 py-20 text-center text-gray-400 italic text-sm">No scheduled interviews found.</td></tr>
-                                        ) : interviewsList.map((interview: any) => (
-                                            <tr key={interview.id} className="hover:bg-gray-50 transition-colors group cursor-pointer" onClick={() => {
-                                                if (interview.applicant) setDrawerApp(interview.applicant);
-                                            }}>
-                                                <td className="px-8 py-6">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600 font-black">
-                                                            {interview.applicant?.name?.charAt(0) || 'C'}
-                                                        </div>
-                                                        <div>
-                                                            <p className="font-black text-[13px] text-[#1A2B3D]">{interview.applicant?.name || 'Unknown'}</p>
-                                                            <p className="text-[11px] text-gray-400 mt-0.5">{interview.applicant?.job_posting?.title || 'Open Role'}</p>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="px-8 py-6">
-                                                    <p className="text-[12px] font-medium text-gray-600">{interview.applicant?.email || 'N/A'}</p>
-                                                    <p className="text-[11px] text-gray-400">{interview.applicant?.phone || '-'}</p>
-                                                </td>
-                                                <td className="px-8 py-6">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-[#1F7A6E] group-hover:text-white transition-colors">
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                                        </div>
-                                                        <div>
-                                                            <p className="font-bold text-[#1A2B3D] text-[13px]">
-                                                                {new Date(interview.scheduled_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                                                            </p>
-                                                            <p className="text-[#1F7A6E] font-black text-[11px]">
-                                                                {new Date(interview.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="px-8 py-6 text-[13px] text-gray-600 capitalize font-medium">
-                                                    {interview.type}
-                                                </td>
-                                                <td className="px-8 py-6">
-                                                    <span className="px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 border border-emerald-100 shadow-sm">
-                                                        Confirmed
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                        <p className="text-[11px] text-gray-400 mt-0.5 tracking-tight">
+                                            {req.department} · {req.tenant?.name || user.tenant?.name || 'Droga Pharma'}
+                                        </p>
+                                    </td>
+                                    <td className="px-8 py-6 text-[13px] text-gray-600">
+                                        {req.requester?.name || 'Hiring Manager'}
+                                    </td>
+                                    <td className="px-8 py-6 text-[13px] text-gray-600">
+                                        {req.location}
+                                    </td>
+                                    <td className="px-8 py-6 text-[13px] text-[#1A2B3D] font-black">
+                                        {req.budget ? req.budget.toLocaleString() : '15,000'} ETB /mo
+                                    </td>
+                                    <td className="px-8 py-6 text-[13px] text-gray-600">
+                                        {new Date(req.created_at).toLocaleDateString()}
+                                    </td>
+                                    <td className="px-8 py-6">
+                                        <span className={`px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest ${req.status === 'approved' ? 'bg-emerald-50 text-emerald-600' :
+                                            req.status === 'pending' ? 'bg-amber-50 text-amber-600' :
+                                                'bg-red-50 text-red-500'
+                                            }`}>
+                                            {req.status}
+                                        </span>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )
+            }
+
+            {
+                initialTab === 'Calendar' && (
+                    <div className="flex flex-col">
+                        <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-white">
+                            <div className="space-y-1">
+                                <h2 className="text-2xl font-black text-[#1A2B3D] flex items-center gap-3">
+                                    <div className="w-2 h-8 bg-[#1F7A6E] rounded-full" />
+                                    INTERVIEW CALENDAR
+                                </h2>
+                                <p className="text-xs font-medium text-gray-400">Manage and view all upcoming scheduled interviews</p>
                             </div>
-                        )
-                    }
-                    {
-                        initialTab === 'Reports' && (
-                            <div className="p-10 space-y-10">
-                                {/* Global Filter Bar */}
-                                <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between sticky top-0 z-10">
-                                    <div className="flex items-center gap-6">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center text-gray-400">📅</div>
-                                            <div>
-                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Timeframe</p>
-                                                <select
-                                                    value={reportFilters.dateRange}
-                                                    onChange={e => setReportFilters(prev => ({ ...prev, dateRange: e.target.value }))}
-                                                    className="text-sm font-bold text-[#1A2B3D] bg-transparent outline-none cursor-pointer"
-                                                >
-                                                    <option value="7">Last 7 Days</option>
-                                                    <option value="30">Last 30 Days</option>
-                                                    <option value="90">Last 90 Days</option>
-                                                    <option value="All">All Time</option>
-                                                </select>
+                            <div className="flex items-center gap-4">
+                                <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 px-4 py-2 rounded-full border border-gray-100">
+                                    Upcoming: <span className="text-[#1A2B3D]">{interviewsList.length}</span>
+                                </p>
+                            </div>
+                        </div>
+                        <table className="w-full text-left">
+                            <thead className="bg-[#F9FAFB] border-b border-gray-100">
+                                <tr>
+                                    {['CANDIDATE', 'CONTACT', 'INTERVIEW DATE & TIME', 'TYPE', 'STATUS'].map(h => (
+                                        <th key={h} className="px-8 py-4 text-[11px] font-black text-gray-400 uppercase tracking-widest">{h}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                                {interviewsList.length === 0 ? (
+                                    <tr><td colSpan={5} className="px-8 py-20 text-center text-gray-400 italic text-sm">No scheduled interviews found.</td></tr>
+                                ) : interviewsList.map((interview: any) => (
+                                    <tr key={interview.id} className="hover:bg-gray-50 transition-colors group cursor-pointer" onClick={() => {
+                                        if (interview.applicant) setDrawerApp(interview.applicant);
+                                    }}>
+                                        <td className="px-8 py-6">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600 font-black">
+                                                    {interview.applicant?.name?.charAt(0) || 'C'}
+                                                </div>
+                                                <div>
+                                                    <p className="font-black text-[13px] text-[#1A2B3D]">{interview.applicant?.name || 'Unknown'}</p>
+                                                    <p className="text-[11px] text-gray-400 mt-0.5">{interview.applicant?.job_posting?.title || 'Open Role'}</p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-8 py-6">
+                                            <p className="text-[12px] font-medium text-gray-600">{interview.applicant?.email || 'N/A'}</p>
+                                            <p className="text-[11px] text-gray-400">{interview.applicant?.phone || '-'}</p>
+                                        </td>
+                                        <td className="px-8 py-6">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-[#1F7A6E] group-hover:text-white transition-colors">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                </div>
+                                                <div>
+                                                    <p className="font-bold text-[#1A2B3D] text-[13px]">
+                                                        {new Date(interview.scheduled_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                                    </p>
+                                                    <p className="text-[#1F7A6E] font-black text-[11px]">
+                                                        {new Date(interview.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-8 py-6 text-[13px] text-gray-600 capitalize font-medium">
+                                            {interview.type}
+                                        </td>
+                                        <td className="px-8 py-6">
+                                            <span className="px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 border border-emerald-100 shadow-sm">
+                                                Confirmed
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )
+            }
+
+            {
+                initialTab === 'Reports' && (
+                    <div className="flex bg-gray-50 min-h-[calc(100vh-100px)]">
+                        {/* Slim left sidebar for filters */}
+                        <div className="w-64 bg-white border-r border-gray-100 p-6 space-y-6 sticky top-0 h-screen overflow-y-auto">
+                            <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">Filters</h3>
+
+                            <div className="space-y-2">
+                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Timeframe</p>
+                                <select
+                                    value={reportFilters.dateRange}
+                                    onChange={e => { setReportFilters(prev => ({ ...prev, dateRange: e.target.value })); fetchData(1); }}
+                                    className="w-full p-2 text-sm font-bold text-[#1A2B3D] bg-gray-50 border border-gray-100 rounded-lg outline-none cursor-pointer focus:border-[#1F7A6E] transition-colors"
+                                >
+                                    <option value="7">Last 7 Days</option>
+                                    <option value="30">Last 30 Days</option>
+                                    <option value="90">Last 90 Days</option>
+                                    <option value="All">All Time</option>
+                                </select>
+                            </div>
+
+                            <div className="space-y-2">
+                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Department</p>
+                                <select
+                                    value={reportFilters.department}
+                                    onChange={e => { setReportFilters(prev => ({ ...prev, department: e.target.value })); fetchData(1); }}
+                                    className="w-full p-2 text-sm font-bold text-[#1A2B3D] bg-gray-50 border border-gray-100 rounded-lg outline-none cursor-pointer focus:border-[#1F7A6E] transition-colors"
+                                >
+                                    <option value="All">All Departments</option>
+                                    {[...new Set((jobs || []).map(j => j.department || j.requisition?.department).filter(Boolean))].map(dept => (
+                                        <option key={String(dept)} value={String(dept)}>{String(dept)}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="space-y-2">
+                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Specific Role</p>
+                                <select
+                                    value={reportFilters.jobId}
+                                    onChange={e => { setReportFilters(prev => ({ ...prev, jobId: e.target.value })); fetchData(1); }}
+                                    className="w-full p-2 text-sm font-bold text-[#1A2B3D] bg-gray-50 border border-gray-100 rounded-lg outline-none cursor-pointer focus:border-[#1F7A6E] transition-colors truncate"
+                                >
+                                    <option value="All">All Open Roles</option>
+                                    {(jobs || []).map(job => (
+                                        <option key={job.id} value={job.id}>{job.title}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <button onClick={() => fetchData(1)} className="w-full mt-6 px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-200 transition-colors flex items-center justify-center gap-2">
+                                <svg className={`w-3.5 h-3.5 ${statsLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004 12m0 8h5.082m-5.082-5H19a4 4 0 003.582-5H19" /></svg>
+                                {statsLoading ? 'Loading…' : 'Refresh'}
+                            </button>
+                        </div>
+
+                        {/* Main content area */}
+                        {statsLoading && !stats ? (
+                            /* Skeleton placeholder while data loads */
+                            <div className="flex-1 p-10 space-y-6 animate-pulse">
+                                <div className="grid grid-cols-4 gap-6">
+                                    {[...Array(4)].map((_, i) => (
+                                        <div key={i} className="bg-white p-5 rounded-2xl border border-gray-100 flex items-center gap-4">
+                                            <div className="w-10 h-10 rounded-lg bg-gray-100 shrink-0" />
+                                            <div className="flex-1 space-y-2">
+                                                <div className="h-2.5 bg-gray-100 rounded w-3/4" />
+                                                <div className="h-5 bg-gray-100 rounded w-1/2" />
                                             </div>
                                         </div>
-                                        <div className="w-px h-8 bg-gray-100" />
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center text-gray-400">🏢</div>
-                                            <div>
-                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Department</p>
-                                                <select
-                                                    value={reportFilters.department}
-                                                    onChange={e => setReportFilters(prev => ({ ...prev, department: e.target.value }))}
-                                                    className="text-sm font-bold text-[#1A2B3D] bg-transparent outline-none cursor-pointer"
-                                                >
-                                                    <option value="All">All Departments</option>
-                                                    {[...new Set(jobs.map(j => j.department || j.requisition?.department).filter(Boolean))].map(dept => (
-                                                        <option key={String(dept)} value={String(dept)}>{String(dept)}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div className="w-px h-8 bg-gray-100" />
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center text-gray-400">💼</div>
-                                            <div>
-                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Specific Role</p>
-                                                <select
-                                                    value={reportFilters.jobId}
-                                                    onChange={e => setReportFilters(prev => ({ ...prev, jobId: e.target.value }))}
-                                                    className="text-sm font-bold text-[#1A2B3D] bg-transparent outline-none cursor-pointer w-48 truncate"
-                                                >
-                                                    <option value="All">All Open Roles</option>
-                                                    {jobs.map(job => (
-                                                        <option key={job.id} value={job.id}>{job.title}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex items-center gap-3">
-                                        <button onClick={() => fetchData(1)} className="px-4 py-2 bg-gray-50 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-100 transition-colors">
-                                            ↻ Refresh
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                if (!stats || !stats.raw_data) return;
-
-                                                const timestamp = new Date().toISOString();
-                                                const recruiterId = user?.id || 'SYS';
-
-                                                // Build Standardized Tabular Headers
-                                                const headers = [
-                                                    'Candidate_Name',
-                                                    'Candidate_Email',
-                                                    'Candidate_Phone',
-                                                    'Job_Title',
-                                                    'Department',
-                                                    'Current_Status',
-                                                    'Application_Date',
-                                                    'Hired_Date_Time'
-                                                ];
-
-                                                const rows = stats.raw_data.map((row: any) => {
-                                                    const appDate = row.created_at ? row.created_at.split('T')[0] : '';
-                                                    let hiredDateTime = '';
-                                                    if (row.status === 'hired' && row.updated_at) {
-                                                        // Convert "2026-02-27T04:26:07.000000Z" to "2026-02-27 04:26:07"
-                                                        hiredDateTime = row.updated_at.replace('T', ' ').split('.')[0];
-                                                    }
-
-                                                    return [
-                                                        `"${(row.name || '').replace(/"/g, '""')}"`,
-                                                        `"${(row.email || '').replace(/"/g, '""')}"`,
-                                                        `"${(row.phone || '').replace(/"/g, '""')}"`,
-                                                        `"${(row.job_title || '').replace(/"/g, '""')}"`,
-                                                        `"${(row.department || '').replace(/"/g, '""')}"`,
-                                                        `"${(row.status || '').replace(/"/g, '""')}"`,
-                                                        appDate,
-                                                        `"${hiredDateTime}"`
-                                                    ];
-                                                });
-
-                                                const csvContent = "data:text/csv;charset=utf-8,"
-                                                    + [headers.join(","), ...rows.map((e: string[]) => e.join(","))].join("\n");
-
-                                                const encodedUri = encodeURI(csvContent);
-                                                const link = document.createElement("a");
-                                                link.setAttribute("href", encodedUri);
-                                                link.setAttribute("download", `Candidate_Export_${timestamp.split('T')[0]}.csv`);
-                                                document.body.appendChild(link);
-                                                link.click();
-                                                document.body.removeChild(link);
-                                            }}
-                                            className="px-4 py-2 bg-[#1A2B3D] text-white rounded-lg text-xs font-bold hover:bg-[#1A2B3D]/90 transition-colors shadow-lg shadow-[#1A2B3D]/20"
-                                        >
-                                            Export CSV
-                                        </button>
+                                    ))}
+                                </div>
+                                <div className="grid grid-cols-2 gap-10">
+                                    <div className="bg-white rounded-[32px] border border-gray-100 h-64" />
+                                    <div className="space-y-6">
+                                        <div className="bg-white rounded-[32px] border border-gray-100 h-28" />
+                                        <div className="bg-white rounded-[32px] border border-gray-100 h-32" />
                                     </div>
                                 </div>
+                            </div>
+                        ) : (
+                            <div className="flex-1 p-10 space-y-10">
 
-                                {/* Analytics Stat Grid */}
+                                {/* Tight Metric Cards */}
                                 <div className="grid grid-cols-4 gap-6">
                                     {[
-                                        { label: 'Total Placements', value: stats?.funnel?.hired || 0, icon: '🏆', color: 'emerald' },
-                                        { label: 'Active Pipeline', value: (stats?.funnel?.applied || 0) - (stats?.funnel?.hired || 0) - (stats?.funnel?.rejected || 0), icon: '🔥', color: 'blue' },
-                                        { label: 'Pending Reqs', value: stats?.requisitions?.pending || 0, icon: '⏳', color: 'amber' },
-                                        { label: 'Success Rate', value: stats?.funnel?.applied > 0 ? Math.round((stats.funnel.hired / stats.funnel.applied) * 100) + '%' : '0%', icon: '📈', color: 'indigo' },
+                                        {
+                                            label: 'Total Placements',
+                                            value: stats?.funnel?.hired || 0,
+                                            icon: (
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                                                </svg>
+                                            ),
+                                            color: 'emerald'
+                                        },
+                                        {
+                                            label: 'Active Pipeline',
+                                            value: (stats?.funnel?.applied || 0) - (stats?.funnel?.hired || 0) - (stats?.funnel?.rejected || 0),
+                                            icon: (
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                                                </svg>
+                                            ),
+                                            color: 'blue'
+                                        },
+                                        {
+                                            label: 'Pending Reqs',
+                                            value: stats?.requisitions?.pending || 0,
+                                            icon: (
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                            ),
+                                            color: 'amber'
+                                        },
+                                        {
+                                            label: 'Success Rate',
+                                            value: stats?.funnel?.applied > 0 ? Math.round((stats.funnel.hired / stats.funnel.applied) * 100) + '%' : '0%',
+                                            icon: (
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                                                </svg>
+                                            ),
+                                            color: 'indigo'
+                                        },
                                     ].map((stat, i) => (
-                                        <div key={i} className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-xl shadow-gray-200/20 hover:scale-[1.02] transition-transform group">
-                                            <div className={`w-12 h-12 rounded-2xl bg-${stat.color}-50 flex items-center justify-center text-xl mb-4 group-hover:rotate-12 transition-transform`}>{stat.icon}</div>
-                                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">{stat.label}</p>
-                                            <p className="text-3xl font-black text-[#1A2B3D]">{stat.value}</p>
+                                        <div key={i} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4 hover:scale-[1.02] transition-transform group">
+                                            <div className={`w-10 h-10 rounded-lg ${stat.color === 'emerald' ? 'bg-emerald-50 text-emerald-600' :
+                                                stat.color === 'blue' ? 'bg-blue-50 text-blue-600' :
+                                                    stat.color === 'amber' ? 'bg-amber-50 text-amber-600' :
+                                                        'bg-indigo-50 text-indigo-600'
+                                                } flex items-center justify-center shrink-0`}>
+                                                {stat.icon}
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-0.5">{stat.label}</p>
+                                                <p className="text-xl font-black text-[#1A2B3D]">{stat.value}</p>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-10">
-                                    {/* Application Funnel (Interactive) */}
-                                    <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm flex flex-col">
-                                        <h3 className="text-[13px] font-black text-[#1A2B3D] uppercase tracking-widest mb-8 flex items-center gap-2">
+                                    {/* Application Funnel (Compact) */}
+                                    <div className="bg-white p-8 rounded-[32px] border border-gray-100 shadow-sm flex flex-col">
+                                        <h3 className="text-[13px] font-black text-[#1A2B3D] uppercase tracking-widest mb-6 flex items-center gap-2">
                                             <div className="w-2 h-2 rounded-full bg-[#1F7A6E]" />
                                             Hiring Funnel Analytics
                                         </h3>
-                                        <div className="space-y-6 flex-1">
+                                        <div className="space-y-4 flex-1">
                                             {[
                                                 { label: 'Applied', raw: 'new', tab: 'NEW', count: stats?.funnel?.applied || 0, color: '#1F7A6E', pct: 100 },
                                                 { label: 'Interviewed', raw: 'interview', tab: 'INTERVIEWS', count: stats?.funnel?.interview || 0, color: '#0066CC', pct: stats?.funnel?.applied ? Math.round(((stats?.funnel?.interview || 0) / stats.funnel.applied) * 100) : 0 },
@@ -1034,9 +1132,8 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                             ].map((item, i) => (
                                                 <div
                                                     key={i}
-                                                    className="space-y-2 cursor-pointer group"
+                                                    className="space-y-1 cursor-pointer group"
                                                     onClick={() => {
-                                                        // Navigate to the Candidates tab and set the subTab
                                                         const url = new URL(window.location.href);
                                                         url.searchParams.set('tab', 'Candidates');
                                                         window.history.pushState({}, '', url);
@@ -1044,13 +1141,13 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                                     }}
                                                 >
                                                     <div className="flex justify-between items-end">
-                                                        <p className="text-[11px] font-black text-gray-400 group-hover:text-[#1A2B3D] transition-colors uppercase tracking-widest flex items-center gap-2">
+                                                        <p className="text-[10px] font-black text-gray-400 group-hover:text-[#1A2B3D] transition-colors uppercase tracking-widest flex items-center gap-1">
                                                             {item.label}
-                                                            <svg className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                                                            <svg className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
                                                         </p>
-                                                        <p className="text-sm font-black text-[#1A2B3D]">{item.count} Talent</p>
+                                                        <p className="text-xs font-black text-[#1A2B3D]">{item.count} Talent</p>
                                                     </div>
-                                                    <div className="h-4 bg-gray-50 rounded-full overflow-hidden border border-gray-100 p-0.5 group-hover:border-gray-200 transition-colors">
+                                                    <div className="h-3 bg-gray-50 rounded-full overflow-hidden border border-gray-100 p-0.5 group-hover:border-gray-200 transition-colors">
                                                         <motion.div
                                                             initial={{ width: 0 }}
                                                             animate={{ width: `${item.pct}%` }}
@@ -1060,54 +1157,62 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                                     </div>
                                                 </div>
                                             ))}
-                                            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest text-center mt-6 p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                                            <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest text-center mt-6 p-3 bg-gray-50 rounded-xl border border-gray-100">
                                                 💡 Click any stage to jump directly to those candidates
                                             </p>
                                         </div>
                                     </div>
 
                                     {/* Velocity & Sourcing Column */}
-                                    <div className="space-y-10 flex flex-col">
+                                    <div className="space-y-6 flex flex-col">
 
                                         {/* Time To Hire Module */}
-                                        <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm relative overflow-hidden group">
-                                            <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
-                                                <svg className="w-24 h-24 text-[#0066CC]" fill="currentColor" viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z" /></svg>
+                                        <div className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm relative overflow-hidden group">
+                                            <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
+                                                <svg className="w-20 h-20 text-[#0066CC]" fill="currentColor" viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z" /></svg>
                                             </div>
-                                            <h3 className="text-[13px] font-black text-[#1A2B3D] uppercase tracking-widest mb-6 flex items-center gap-2 relative z-10">
+                                            <h3 className="text-[11px] font-black text-[#1A2B3D] uppercase tracking-widest mb-4 flex items-center gap-2 relative z-10">
                                                 <div className="w-2 h-2 rounded-full bg-[#0066CC]" />
                                                 Velocity: Time-to-Hire
                                             </h3>
-                                            <div className="flex items-end gap-4 relative z-10">
-                                                <p className="text-5xl font-black text-[#1A2B3D] tracking-tighter">
+                                            <div className="flex items-end gap-3 relative z-10">
+                                                <p className="text-4xl font-black text-[#1A2B3D] tracking-tighter">
                                                     {stats?.velocity?.average_time_to_hire_days || 0}
                                                 </p>
-                                                <div className="space-y-1 pb-1">
-                                                    <p className="text-[14px] font-bold text-gray-500">Days on average</p>
-                                                    <p className="text-[10px] font-black text-[#0066CC] uppercase tracking-widest bg-blue-50 px-2 py-0.5 rounded inline-block">From App to Offer</p>
+                                                <div className="space-y-0.5 pb-0.5">
+                                                    <p className="text-[12px] font-bold text-gray-500">Days on average</p>
+                                                    <p className="text-[9px] font-black text-[#0066CC] uppercase tracking-widest bg-blue-50 px-2 py-0.5 rounded inline-block">From App to Offer</p>
                                                 </div>
                                             </div>
                                         </div>
 
                                         {/* Candidate Sources */}
-                                        <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm flex-1">
-                                            <h3 className="text-[13px] font-black text-[#1A2B3D] uppercase tracking-widest mb-6 flex items-center gap-2">
+                                        <div className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm flex-1">
+                                            <h3 className="text-[11px] font-black text-[#1A2B3D] uppercase tracking-widest mb-4 flex items-center gap-2">
                                                 <div className="w-2 h-2 rounded-full bg-[#9B51E0]" />
                                                 Candidate Sources
                                             </h3>
-                                            <div className="space-y-4">
+                                            <div className="space-y-3">
                                                 {stats?.sources?.map((src: any, i: number) => {
                                                     const total = stats?.funnel?.applied || 1; // Prevent div by zero
                                                     const pct = Math.round((src.count / total) * 100);
                                                     return (
-                                                        <div key={i} className="flex items-center gap-4 group">
-                                                            <div className="w-10 h-10 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center text-sm shadow-sm group-hover:border-[#9B51E0] transition-colors">
-                                                                {src.source === 'LinkedIn' ? '💼' : src.source === 'Website' ? '🌐' : src.source === 'Referral' ? '🤝' : '📢'}
+                                                        <div key={i} className="flex items-center gap-3 group">
+                                                            <div className="w-8 h-8 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center text-sm shadow-sm group-hover:border-[#9B51E0] transition-colors shrink-0">
+                                                                {src.source === 'LinkedIn' ? (
+                                                                    <svg className="w-4 h-4 text-[#0077B5]" fill="currentColor" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z" /></svg>
+                                                                ) : src.source === 'Website' ? (
+                                                                    <svg className="w-4 h-4 text-[#1A2B3D]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 019-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
+                                                                ) : src.source === 'Referral' ? (
+                                                                    <svg className="w-4 h-4 text-[#1F7A6E]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                                                                ) : (
+                                                                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" /></svg>
+                                                                )}
                                                             </div>
                                                             <div className="flex-1">
-                                                                <div className="flex justify-between items-end mb-1.5">
-                                                                    <p className="text-[12px] font-bold text-[#1A2B3D]">{src.source || 'Direct Applied'}</p>
-                                                                    <p className="text-[10px] font-black text-gray-400">{src.count} ({pct}%)</p>
+                                                                <div className="flex justify-between items-end mb-1">
+                                                                    <p className="text-[11px] font-bold text-[#1A2B3D]">{src.source || 'Direct Applied'}</p>
+                                                                    <p className="text-[9px] font-black text-gray-400">{src.count} ({pct}%)</p>
                                                                 </div>
                                                                 <div className="h-1.5 w-full bg-gray-50 rounded-full overflow-hidden">
                                                                     <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }} className="h-full bg-[#9B51E0] rounded-full" />
@@ -1117,7 +1222,7 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                                     );
                                                 })}
                                                 {(!stats?.sources || stats.sources.length === 0) && (
-                                                    <p className="text-gray-400 italic text-sm text-center py-6">No sourcing data available.</p>
+                                                    <p className="text-gray-400 italic text-xs text-center py-4">No sourcing data available.</p>
                                                 )}
                                             </div>
                                         </div>
@@ -1125,11 +1230,11 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                     </div>
                                 </div>
                             </div>
-                        )
-                    }
-                </div >
-            )
+                        )} {/* end statsLoading ternary */}
+                    </div>
+                )
             }
+
 
             {/* Requisition Detail Side Drawer */}
             <AnimatePresence>
@@ -1149,7 +1254,7 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                 <div>
                                     <p className="text-[10px] font-black text-[#1F7A6E] tracking-widest uppercase mb-1">REQ{drawerReq.id} Details</p>
                                     <h2 className="text-2xl font-black text-[#1A2B3D]">{drawerReq.title}</h2>
-                                    <p className="text-gray-400 text-sm mt-1">{drawerReq.department} · {drawerReq.tenant?.name || 'Droga Pharma'}</p>
+                                    <p className="text-gray-400 text-sm mt-1">{drawerReq.department} · {drawerReq.tenant?.name || user.tenant?.name || 'Droga Pharma'}</p>
                                 </div>
                                 <button onClick={() => setDrawerReq(null)} className="text-gray-300 hover:text-gray-500 transition-colors">
                                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -1172,7 +1277,7 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                     </div>
                                     <div>
                                         <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 leading-none">Location / Branch</p>
-                                        <p className="text-sm font-bold text-[#1A2B3D]">{drawerReq.location || 'Addis Ababa (Bole)'}</p>
+                                        <p className="text-sm font-bold text-[#1A2B3D]">{drawerReq.location}</p>
                                     </div>
                                     <div>
                                         <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 leading-none">Priority</p>
@@ -1180,7 +1285,7 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                                     </div>
                                     <div>
                                         <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 leading-none">Budget Salary</p>
-                                        <p className="text-sm font-black text-[#1A2B3D]">${drawerReq.budget ? (drawerReq.budget / 1000).toFixed(0) + 'k' : '45k'} /yr</p>
+                                        <p className="text-sm font-black text-[#1A2B3D]">{drawerReq.budget ? drawerReq.budget.toLocaleString() : '15,000'} ETB /mo</p>
                                     </div>
                                 </section>
 
@@ -1764,6 +1869,6 @@ export default function TADashboard({ user, activeTab: initialTab, onLogout }: {
                     </motion.div>
                 )}
             </AnimatePresence>
-        </div >
+        </div>
     );
 }

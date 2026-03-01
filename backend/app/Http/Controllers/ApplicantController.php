@@ -21,6 +21,7 @@ class ApplicantController extends Controller
     {
         $user = $request->user();
         $query = Applicant::with([
+            'tenant',
             'jobPosting.requisition',
             'attachments',
             'interviews' => function ($q) {
@@ -92,7 +93,7 @@ class ApplicantController extends Controller
     public function updateStatus(string $id, Request $request): JsonResponse
     {
         $request->validate([
-            'status' => 'required|in:applied,phone_screen,interview,offer,hired,rejected',
+            'status' => 'required|in:applied,phone_screen,interview,offer,hired,rejected,under_review,shortlisted,new',
             'feedback' => 'nullable|string',
             'offered_salary' => 'nullable|string|max:100',
             'start_date' => 'nullable|string|max:100',
@@ -100,9 +101,14 @@ class ApplicantController extends Controller
             'rejection_note' => 'nullable|string|max:1000',
         ]);
 
-        $applicant = Applicant::where('id', $id)
-            ->where('tenant_id', $request->user()->tenant_id)
-            ->firstOrFail();
+        $authUser = $request->user();
+        $query = Applicant::where('id', $id);
+
+        if (!$authUser->hasRole('admin')) {
+            $query->where('tenant_id', $authUser->tenant_id);
+        }
+
+        $applicant = $query->firstOrFail();
 
         $feedback = $applicant->feedback ?? [];
         if ($request->feedback) {
@@ -165,10 +171,19 @@ class ApplicantController extends Controller
 
     public function stats(Request $request): JsonResponse
     {
-        $tenantId = $request->user()->tenant_id;
-        $query = \App\Models\Applicant::where('applicants.tenant_id', $tenantId)
+        $user = $request->user();
+        $isAdmin = $user->hasRole('admin');
+        $tenantId = $user->tenant_id;
+
+        $query = \App\Models\Applicant::query()
+            ->select('applicants.*')
             ->join('job_postings', 'applicants.job_posting_id', '=', 'job_postings.id')
-            ->leftJoin('job_requisitions', 'job_postings.job_requisition_id', '=', 'job_requisitions.id');
+            ->leftJoin('job_requisitions', 'job_postings.job_requisition_id', '=', 'job_requisitions.id')
+            ->leftJoin('tenants', 'applicants.tenant_id', '=', 'tenants.id');
+
+        if (!$isAdmin) {
+            $query->where('applicants.tenant_id', $tenantId);
+        }
 
         // Apply Global Filters
         if ($request->has('department') && $request->department !== 'All') {
@@ -185,6 +200,16 @@ class ApplicantController extends Controller
         if ($request->has('date_range') && $request->date_range !== 'All') {
             $days = (int) $request->date_range;
             $query->where('applicants.created_at', '>=', now()->subDays($days));
+        }
+
+        if ($request->has('search') && $request->search) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('applicants.name', 'LIKE', "%{$search}%")
+                    ->orWhere('applicants.email', 'LIKE', "%{$search}%")
+                    ->orWhere('applicants.phone', 'LIKE', "%{$search}%")
+                    ->orWhere('applicants.professional_background', 'LIKE', "%{$search}%");
+            });
         }
 
         // 1. Funnel Metrics (using cloned query to maintain filters)
@@ -224,9 +249,17 @@ class ApplicantController extends Controller
             ->orderByDesc('count')
             ->get();
 
-        // 5. Requisitions (Not strictly tied to applicant filters, but scoping by tenant)
-        $reqTotal = \App\Models\JobRequisition::where('tenant_id', $tenantId)->count();
-        $reqPending = \App\Models\JobRequisition::where('tenant_id', $tenantId)->where('status', 'pending')->count();
+        // 5. Requisitions (Not strictly tied to applicant filters, but scoping by role/tenant)
+        $reqTotalQuery = \App\Models\JobRequisition::query();
+        $reqPendingQuery = \App\Models\JobRequisition::where('status', 'pending');
+
+        if (!$isAdmin) {
+            $reqTotalQuery->where('tenant_id', $tenantId);
+            $reqPendingQuery->where('tenant_id', $tenantId);
+        }
+
+        $reqTotal = $reqTotalQuery->count();
+        $reqPending = $reqPendingQuery->count();
 
         // 6. Raw Data for Export (Granular Candidate Logs)
         $rawQuery = clone $query;
@@ -239,6 +272,7 @@ class ApplicantController extends Controller
             'applicants.created_at',
             'applicants.updated_at',
             'job_postings.title as job_title',
+            'tenants.name as company_name',
             \DB::raw('COALESCE(job_postings.department, job_requisitions.department) as department')
         ])->orderBy('applicants.created_at', 'desc')->get();
 
@@ -262,5 +296,96 @@ class ApplicantController extends Controller
         ];
 
         return response()->json($stats);
+    }
+
+    public function export(Request $request)
+    {
+        $user = $request->user();
+        $isAdmin = $user->hasRole('admin');
+        $tenantId = $user->tenant_id;
+
+        $query = \App\Models\Applicant::query()
+            ->join('job_postings', 'applicants.job_posting_id', '=', 'job_postings.id')
+            ->leftJoin('job_requisitions', 'job_postings.job_requisition_id', '=', 'job_requisitions.id')
+            ->leftJoin('tenants', 'applicants.tenant_id', '=', 'tenants.id');
+
+        if (!$isAdmin) {
+            $query->where('applicants.tenant_id', $tenantId);
+        }
+
+        // Apply Global Filters
+        if ($request->has('department') && $request->department !== 'All') {
+            $query->where(function ($q) use ($request) {
+                $q->where('job_postings.department', $request->department)
+                    ->orWhere('job_requisitions.department', $request->department);
+            });
+        }
+
+        if ($request->has('job_id') && $request->job_id !== 'All') {
+            $query->where('applicants.job_posting_id', $request->job_id);
+        }
+
+        if ($request->has('date_range') && $request->date_range !== 'All') {
+            $days = (int) $request->date_range;
+            $query->where('applicants.created_at', '>=', now()->subDays($days));
+        }
+
+        $rawData = $query->select([
+            'applicants.name',
+            'applicants.email',
+            'applicants.phone',
+            'applicants.source',
+            'applicants.status',
+            'applicants.created_at',
+            'applicants.updated_at',
+            'job_postings.title as job_title',
+            'tenants.name as company_name',
+            \DB::raw('COALESCE(job_postings.department, job_requisitions.department) as department')
+        ])->orderBy('applicants.created_at', 'desc')->get();
+
+        $headers = [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="Candidate_Export_' . now()->format('Y-m-d') . '.csv"',
+        ];
+
+        $callback = function () use ($rawData) {
+            $file = fopen('php://output', 'w');
+            // Byte Order Mark (BOM) for Excel
+            fputs($file, "\xEF\xBB\xBF");
+
+            fputcsv($file, [
+                'Company Name',
+                'Candidate Name',
+                'Candidate Email',
+                'Candidate Phone',
+                'Job Title',
+                'Department',
+                'Current Status',
+                'Application Date',
+                'Hired Date/Time'
+            ]);
+
+            foreach ($rawData as $row) {
+                $hiredDateTime = '';
+                if ($row->status === 'hired' && $row->updated_at) {
+                    $hiredDateTime = $row->updated_at->format('Y-m-d H:i:s');
+                }
+
+                fputcsv($file, [
+                    $row->company_name,
+                    $row->name,
+                    $row->email,
+                    $row->phone,
+                    $row->job_title,
+                    $row->department,
+                    $row->status,
+                    $row->created_at->format('Y-m-d'),
+                    $hiredDateTime
+                ]);
+            }
+            fclose($file);
+        };
+
+        return response()->stream($callback, 200, $headers);
     }
 }

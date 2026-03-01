@@ -27,6 +27,15 @@ class JobController extends Controller
             $query->where('status', $request->status);
         }
 
+        if ($request->has('search') && $request->search) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'LIKE', "%{$search}%")
+                    ->orWhere('department', 'LIKE', "%{$search}%")
+                    ->orWhere('description', 'LIKE', "%{$search}%");
+            });
+        }
+
         $jobs = $query->orderBy('created_at', 'desc')->get();
 
         return response()->json($jobs);
@@ -53,13 +62,25 @@ class JobController extends Controller
             return response()->json(['error' => 'No active company context found.'], 400);
         }
 
+        $location = $request->location;
+        $department = $request->department;
+
+        if ($request->job_requisition_id) {
+            $requisition = \App\Models\JobRequisition::find($request->job_requisition_id);
+            if ($requisition) {
+                $location = $location ?: $requisition->location;
+                $department = $department ?: $requisition->department;
+            }
+        }
+
         $job = JobPosting::create([
             'tenant_id' => $tenantId,
             'job_requisition_id' => $request->job_requisition_id,
             'title' => $request->title,
+            'department' => $department,
             'description' => $request->description,
             'requirements' => $request->requirements,
-            'location' => $request->location,
+            'location' => $location,
             'type' => $request->type,
             'status' => 'active',
         ]);

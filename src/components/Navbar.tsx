@@ -183,8 +183,12 @@ export default function Navbar({ user, onLogout }: { user: User; onLogout: () =>
             <div className="flex items-center gap-12">
                 {/* Logo */}
                 <Link href={roleSlug === 'admin' ? "/admin/dashboard" : "/dashboard"} className="flex items-center gap-2 group">
-                    <div className="bg-white text-[#1A2B3D] w-8 h-8 rounded flex items-center justify-center font-black text-xl">D</div>
-                    <span className="text-white font-black text-xl tracking-tighter group-hover:text-teal-400 transition-colors">DROGA</span>
+                    <div className="bg-white text-[#1A2B3D] w-8 h-8 rounded flex items-center justify-center font-black text-xl">
+                        {(roleSlug === 'admin' ? 'D' : user.tenant?.name?.charAt(0)) || 'D'}
+                    </div>
+                    <span className="text-white font-black text-xl tracking-tighter group-hover:text-teal-400 transition-colors">
+                        {(roleSlug === 'admin' ? 'DROGA' : user.tenant?.name) || 'DROGA'}
+                    </span>
                 </Link>
 
                 {/* Nav Links */}

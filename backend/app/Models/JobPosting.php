@@ -15,6 +15,7 @@ class JobPosting extends Model
         'tenant_id',
         'job_requisition_id',
         'title',
+        'department',
         'description',
         'requirements',
         'location',

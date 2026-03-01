@@ -1,9 +1,4 @@
 {
-  "/icon.jpg/route": "app/icon.jpg/route.js",
   "/page": "app/page.js",
-  "/login/page": "app/login/page.js",
-  "/careers/page": "app/careers/page.js",
-  "/admin/dashboard/page": "app/admin/dashboard/page.js",
-  "/admin/contents/page": "app/admin/contents/page.js",
-  "/dashboard/page": "app/dashboard/page.js"
+  "/login/page": "app/login/page.js"
 }
