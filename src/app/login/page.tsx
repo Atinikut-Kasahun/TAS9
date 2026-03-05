@@ -24,8 +24,19 @@ export default function LoginPage() {
             localStorage.setItem("auth_token", data.access_token);
             localStorage.setItem("user", JSON.stringify(data.user));
 
-            // Redirect based on role/tenant logic
-            router.push("/dashboard");
+            // Redirect based on role
+            const roles = data.user?.roles;
+            const firstRole = roles?.[0];
+            const roleSlug = (typeof firstRole === 'string'
+                ? firstRole
+                : firstRole?.slug || firstRole?.name || 'ta_manager'
+            ).toLowerCase();
+
+            if (roleSlug === 'admin') {
+                router.push("/admin/dashboard");
+            } else {
+                router.push("/dashboard");
+            }
         } catch (err: any) {
             setError(err.message || "Invalid credentials");
         } finally {

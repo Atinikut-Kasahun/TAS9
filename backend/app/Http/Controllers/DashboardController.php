@@ -32,7 +32,7 @@ class DashboardController extends Controller
 
     private function adminDashboard(): JsonResponse
     {
-        $stats = Cache::remember('admin_dashboard_stats', now()->addMinutes(1), function () {
+        $stats = Cache::remember('admin_dashboard_stats', now()->addMinutes(10), function () {
             $today = \Carbon\Carbon::today();
             $yesterday = \Carbon\Carbon::yesterday();
             $thirtyDaysAgo = now()->subDays(30);
@@ -101,7 +101,7 @@ class DashboardController extends Controller
 
     private function taManagerDashboard($tenantId): JsonResponse
     {
-        $stats = Cache::remember("ta_manager_dashboard_stats_{$tenantId}", now()->addMinutes(1), function () use ($tenantId) {
+        $stats = Cache::remember("ta_manager_dashboard_stats_{$tenantId}", now()->addMinutes(10), function () use ($tenantId) {
             $today = Carbon::today();
             $yesterday = Carbon::yesterday();
             $thirtyDaysAgo = now()->subDays(30);
@@ -179,15 +179,17 @@ class DashboardController extends Controller
 
     private function hiringManagerDashboard($user): JsonResponse
     {
-        $stats = [
-            'my_requisitions' => JobRequisition::where('requested_by', $user->id)
-                ->orderBy('created_at', 'desc')
-                ->get(),
-            'requisitions_status_count' => JobRequisition::where('requested_by', $user->id)
-                ->select('status', DB::raw('count(*) as count'))
-                ->groupBy('status')
-                ->get(),
-        ];
+        $stats = Cache::remember("hiring_manager_dashboard_stats_{$user->id}", now()->addMinutes(5), function () use ($user) {
+            return [
+                'my_requisitions' => JobRequisition::where('requested_by', $user->id)
+                    ->orderBy('created_at', 'desc')
+                    ->get(),
+                'requisitions_status_count' => JobRequisition::where('requested_by', $user->id)
+                    ->select('status', DB::raw('count(*) as count'))
+                    ->groupBy('status')
+                    ->get(),
+            ];
+        });
 
         return response()->json($stats);
     }
@@ -197,6 +199,12 @@ class DashboardController extends Controller
      */
     public function reportsData(): JsonResponse
     {
+        $avgDaysMap = \App\Models\Applicant::where('status', 'hired')
+            ->whereNotNull('hired_at')
+            ->selectRaw('tenant_id, AVG(DATEDIFF(hired_at, created_at)) as avg_days')
+            ->groupBy('tenant_id')
+            ->pluck('avg_days', 'tenant_id');
+
         $tenants = \App\Models\Tenant::withCount([
             'jobPostings as active_jobs_count' => function ($q) {
                 $q->where('status', 'active');
@@ -212,13 +220,8 @@ class DashboardController extends Controller
             'applicants as interview_count' => function ($q) {
                 $q->where('status', 'interview');
             },
-        ])->get()->map(function ($tenant) {
-            // Time-to-Hire: avg days from application to 'hired'
-            $avgDaysToHire = \App\Models\Applicant::where('tenant_id', $tenant->id)
-                ->where('status', 'hired')
-                ->whereNotNull('hired_at')
-                ->selectRaw('AVG(DATEDIFF(hired_at, created_at)) as avg_days')
-                ->value('avg_days');
+        ])->get()->map(function ($tenant) use ($avgDaysMap) {
+            $avgDaysToHire = $avgDaysMap[$tenant->id] ?? null;
 
             $tenant->avg_days_to_hire = $avgDaysToHire ? round($avgDaysToHire, 1) : null;
             $tenant->conversion_rate = $tenant->applicants_count > 0

@@ -173,127 +173,116 @@ class ApplicantController extends Controller
         $isAdmin = $user->hasRole('admin');
         $tenantId = $user->tenant_id;
 
-        $query = \App\Models\Applicant::query()
-            ->select('applicants.*')
-            ->join('job_postings', 'applicants.job_posting_id', '=', 'job_postings.id')
-            ->leftJoin('job_requisitions', 'job_postings.job_requisition_id', '=', 'job_requisitions.id')
-            ->leftJoin('tenants', 'applicants.tenant_id', '=', 'tenants.id');
+        $cacheKey = 'applicant_stats_' . ($isAdmin ? 'admin' : $tenantId) . '_' . md5(json_encode($request->all()));
 
-        if (!$isAdmin) {
-            $query->where('applicants.tenant_id', $tenantId);
-        }
+        return \Illuminate\Support\Facades\Cache::remember($cacheKey, now()->addMinutes(10), function () use ($request, $isAdmin, $tenantId) {
+            $query = \App\Models\Applicant::query()
+                ->select('applicants.*')
+                ->join('job_postings', 'applicants.job_posting_id', '=', 'job_postings.id')
+                ->leftJoin('job_requisitions', 'job_postings.job_requisition_id', '=', 'job_requisitions.id')
+                ->leftJoin('tenants', 'applicants.tenant_id', '=', 'tenants.id');
 
-        // Apply Global Filters
-        if ($request->has('department') && $request->department !== 'All') {
-            $query->where(function ($q) use ($request) {
-                $q->where('job_postings.department', $request->department)
-                    ->orWhere('job_requisitions.department', $request->department);
-            });
-        }
+            if (!$isAdmin) {
+                $query->where('applicants.tenant_id', $tenantId);
+            }
 
-        if ($request->has('job_id') && $request->job_id !== 'All') {
-            $query->where('applicants.job_posting_id', $request->job_id);
-        }
+            // Apply Global Filters
+            if ($request->has('department') && $request->department !== 'All') {
+                $query->where(function ($q) use ($request) {
+                    $q->where('job_postings.department', $request->department)
+                        ->orWhere('job_requisitions.department', $request->department);
+                });
+            }
 
-        if ($request->has('date_range') && $request->date_range !== 'All') {
-            $days = (int) $request->date_range;
-            $query->where('applicants.created_at', '>=', now()->subDays($days));
-        }
+            if ($request->has('job_id') && $request->job_id !== 'All') {
+                $query->where('applicants.job_posting_id', $request->job_id);
+            }
 
-        if ($request->has('search') && $request->search) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('applicants.name', 'LIKE', "%{$search}%")
-                    ->orWhere('applicants.email', 'LIKE', "%{$search}%")
-                    ->orWhere('applicants.phone', 'LIKE', "%{$search}%")
-                    ->orWhere('applicants.professional_background', 'LIKE', "%{$search}%");
-            });
-        }
+            if ($request->has('date_range') && $request->date_range !== 'All') {
+                $days = (int) $request->date_range;
+                $query->where('applicants.created_at', '>=', now()->subDays($days));
+            }
 
-        // 1. Funnel Metrics (using cloned query to maintain filters)
-        $funnelQuery = clone $query;
-        $totalApplied = $funnelQuery->count();
+            if ($request->has('search') && $request->search) {
+                $search = $request->search;
+                $query->where(function ($q) use ($search) {
+                    $q->where('applicants.name', 'LIKE', "%{$search}%")
+                        ->orWhere('applicants.email', 'LIKE', "%{$search}%")
+                        ->orWhere('applicants.phone', 'LIKE', "%{$search}%")
+                        ->orWhere('applicants.professional_background', 'LIKE', "%{$search}%");
+                });
+            }
 
-        $funnelQuery = clone $query;
-        $totalInterview = $funnelQuery->where('applicants.status', 'interview')->count();
+            // 1. Funnel Metrics
+            $funnelStats = (clone $query)
+                ->selectRaw("
+                    COUNT(*) as total,
+                    SUM(CASE WHEN applicants.status = 'interview' THEN 1 ELSE 0 END) as interview,
+                    SUM(CASE WHEN applicants.status = 'offer' THEN 1 ELSE 0 END) as offer,
+                    SUM(CASE WHEN applicants.status = 'hired' THEN 1 ELSE 0 END) as hired
+                ")->first();
 
-        $funnelQuery = clone $query;
-        $totalOffer = $funnelQuery->where('applicants.status', 'offer')->count();
+            // 2. Department Breakdown
+            $departments = (clone $query)
+                ->selectRaw('COALESCE(job_postings.department, job_requisitions.department) as department, count(applicants.id) as count')
+                ->groupByRaw('COALESCE(job_postings.department, job_requisitions.department)')
+                ->get()
+                ->filter(fn($d) => !empty($d->department))
+                ->values();
 
-        $funnelQuery = clone $query;
-        $totalHired = $funnelQuery->where('applicants.status', 'hired')->count();
+            // 3. Time-to-Hire (Optimized to DB aggregate)
+            $avgTimeToHire = (clone $query)
+                ->where('applicants.status', 'hired')
+                ->selectRaw('AVG(DATEDIFF(applicants.updated_at, applicants.created_at)) as avg_days')
+                ->value('avg_days') ?? 0;
 
-        // 2. Department Breakdown
-        $deptQuery = clone $query;
-        $departments = $deptQuery->selectRaw('COALESCE(job_postings.department, job_requisitions.department) as department, count(applicants.id) as count')
-            ->groupByRaw('COALESCE(job_postings.department, job_requisitions.department)')
-            ->get()
-            ->filter(fn($d) => !empty($d->department))
-            ->values();
+            // 4. Candidate Sources
+            $sources = (clone $query)
+                ->selectRaw('applicants.source, count(applicants.id) as count')
+                ->groupBy('applicants.source')
+                ->orderByDesc('count')
+                ->get();
 
-        // 3. Time-to-Hire (Average days between created_at and updated_at for Hired candidates)
-        $tthQuery = clone $query;
-        $hiredApplicants = $tthQuery->where('applicants.status', 'hired')->select('applicants.created_at', 'applicants.updated_at')->get();
-        $totalDays = 0;
-        foreach ($hiredApplicants as $h) {
-            $totalDays += $h->created_at->diffInDays($h->updated_at);
-        }
-        $avgTimeToHire = $hiredApplicants->count() > 0 ? round($totalDays / $hiredApplicants->count()) : 0;
+            // 5. Requisitions
+            $reqQuery = \App\Models\JobRequisition::query();
+            if (!$isAdmin) {
+                $reqQuery->where('tenant_id', $tenantId);
+            }
+            $reqStats = $reqQuery->selectRaw('COUNT(*) as total, SUM(CASE WHEN status = "pending" THEN 1 ELSE 0 END) as pending')->first();
 
-        // 4. Candidate Sources
-        $sourceQuery = clone $query;
-        $sources = $sourceQuery->selectRaw('applicants.source, count(applicants.id) as count')
-            ->groupBy('applicants.source')
-            ->orderByDesc('count')
-            ->get();
+            // 6. Raw Data for Export (Limit to most recent 500 for performance if it's just for a table/preview)
+            $rawData = (clone $query)->select([
+                'applicants.name',
+                'applicants.email',
+                'applicants.phone',
+                'applicants.source',
+                'applicants.status',
+                'applicants.created_at',
+                'applicants.updated_at',
+                'job_postings.title as job_title',
+                'tenants.name as company_name',
+                \DB::raw('COALESCE(job_postings.department, job_requisitions.department) as department')
+            ])->orderBy('applicants.created_at', 'desc')->limit(500)->get();
 
-        // 5. Requisitions (Not strictly tied to applicant filters, but scoping by role/tenant)
-        $reqTotalQuery = \App\Models\JobRequisition::query();
-        $reqPendingQuery = \App\Models\JobRequisition::where('status', 'pending');
-
-        if (!$isAdmin) {
-            $reqTotalQuery->where('tenant_id', $tenantId);
-            $reqPendingQuery->where('tenant_id', $tenantId);
-        }
-
-        $reqTotal = $reqTotalQuery->count();
-        $reqPending = $reqPendingQuery->count();
-
-        // 6. Raw Data for Export (Granular Candidate Logs)
-        $rawQuery = clone $query;
-        $rawData = $rawQuery->select([
-            'applicants.name',
-            'applicants.email',
-            'applicants.phone',
-            'applicants.source',
-            'applicants.status',
-            'applicants.created_at',
-            'applicants.updated_at',
-            'job_postings.title as job_title',
-            'tenants.name as company_name',
-            \DB::raw('COALESCE(job_postings.department, job_requisitions.department) as department')
-        ])->orderBy('applicants.created_at', 'desc')->get();
-
-        $stats = [
-            'funnel' => [
-                'applied' => $totalApplied,
-                'interview' => $totalInterview,
-                'offer' => $totalOffer,
-                'hired' => $totalHired,
-            ],
-            'departments' => $departments,
-            'velocity' => [
-                'average_time_to_hire_days' => $avgTimeToHire
-            ],
-            'sources' => $sources,
-            'requisitions' => [
-                'total' => $reqTotal,
-                'pending' => $reqPending,
-            ],
-            'raw_data' => $rawData
-        ];
-
-        return response()->json($stats);
+            return response()->json([
+                'funnel' => [
+                    'applied' => $funnelStats->total,
+                    'interview' => $funnelStats->interview,
+                    'offer' => $funnelStats->offer,
+                    'hired' => $funnelStats->hired,
+                ],
+                'departments' => $departments,
+                'velocity' => [
+                    'average_time_to_hire_days' => round($avgTimeToHire)
+                ],
+                'sources' => $sources,
+                'requisitions' => [
+                    'total' => $reqStats->total,
+                    'pending' => $reqStats->pending ?? 0,
+                ],
+                'raw_data' => $rawData
+            ]);
+        });
     }
 
     public function export(Request $request)

@@ -42,10 +42,14 @@ function DashboardContent() {
     }, [router]);
 
     const handleLogout = async () => {
-        try { await apiFetch('/logout', { method: 'POST' }); } catch (_) { }
+        try {
+            await apiFetch('/v1/logout', { method: 'POST' });
+        } catch (_) {
+            // Silence logout errors as it may be due to expired token
+        }
         localStorage.removeItem('auth_token');
         localStorage.removeItem('user');
-        router.push('/');
+        window.location.href = '/';
     };
 
     const roleSlug: string = (() => {
@@ -61,7 +65,7 @@ function DashboardContent() {
         }
     }, [ready, user, roleSlug, router]);
 
-    if (!ready || !user) return <LoadingScreen />;
+    if (!ready || !user || roleSlug === 'admin') return <LoadingScreen />;
 
     return (
         <div className="min-h-screen bg-[#F5F6FA]">

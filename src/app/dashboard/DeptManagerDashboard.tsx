@@ -36,6 +36,7 @@ export default function DeptManagerDashboard({ user, activeTab: initialTab, onLo
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [wizardStep, setWizardStep] = useState(1);
     const [formData, setFormData] = useState(INITIAL_FORM_DATA);
+    const [jdFile, setJdFile] = useState<File | null>(null); // New state for file
     const [submitting, setSubmitting] = useState(false);
     const [jobs, setJobs] = useState<any[] | null>(null);
     const [jobsMeta, setJobsMeta] = useState<any>(null);
@@ -92,14 +93,23 @@ export default function DeptManagerDashboard({ user, activeTab: initialTab, onLo
     const handleSubmit = async () => {
         setSubmitting(true);
         try {
+            const fd = new FormData();
+            Object.entries(formData).forEach(([key, value]) => {
+                fd.append(key, value.toString());
+            });
+            if (jdFile) {
+                fd.append('jd_file', jdFile);
+            }
+
             await apiFetch('/v1/requisitions', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData),
+                // Note: when using FormData, do NOT set Content-Type header
+                body: fd,
             });
             setDrawerOpen(false);
             setWizardStep(1);
             setFormData(INITIAL_FORM_DATA);
+            setJdFile(null); // Clear file after submission
             fetchData();
         } catch (e) {
             console.error(e);
@@ -452,11 +462,41 @@ export default function DeptManagerDashboard({ user, activeTab: initialTab, onLo
                                                 <div>
                                                     <label className="block text-[11px] font-black text-gray-400 uppercase tracking-widest mb-1.5 leading-none">Internal Notes / Justification</label>
                                                     <textarea
-                                                        className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-4 focus:ring-[#1F7A6E]/10 focus:border-[#1F7A6E] transition-all text-sm font-medium h-48 leading-relaxed placeholder:text-gray-300"
+                                                        className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-4 focus:ring-[#1F7A6E]/10 focus:border-[#1F7A6E] transition-all text-sm font-medium h-40 leading-relaxed placeholder:text-gray-300"
                                                         placeholder="Provide context for HR regarding why this role is needed now..."
                                                         value={formData.description}
                                                         onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                                                     />
+                                                </div>
+                                                <div className="pt-4 border-t border-gray-100 border-dashed">
+                                                    <label className="block text-[11px] font-black text-[#1F7A6E] uppercase tracking-widest mb-3">Job Description (JD) File</label>
+                                                    <div className={`relative border-2 border-dashed rounded-xl p-8 transition-all flex flex-col items-center justify-center text-center ${jdFile ? 'border-[#1F7A6E] bg-emerald-50/30' : 'border-gray-200 hover:border-[#1F7A6E] bg-gray-50/50'}`}>
+                                                        <input
+                                                            type="file"
+                                                            onChange={(e) => setJdFile(e.target.files ? e.target.files[0] : null)}
+                                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                                            accept=".pdf,.doc,.docx"
+                                                        />
+                                                        <div className="space-y-2">
+                                                            {jdFile ? (
+                                                                <>
+                                                                    <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm text-emerald-600 mb-2 mx-auto">
+                                                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                                                                    </div>
+                                                                    <p className="text-sm font-black text-[#1A2B3D] truncate max-w-[200px]">{jdFile.name}</p>
+                                                                    <p className="text-[10px] font-bold text-gray-400 uppercase">Click to replace file</p>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm text-gray-300 mb-2 mx-auto">
+                                                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+                                                                    </div>
+                                                                    <p className="text-sm font-black text-[#1F7A6E]">Upload JD Document</p>
+                                                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">PDF or Word (Max 5MB)</p>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </section>

@@ -24,10 +24,15 @@ class JobRequisitionController extends Controller
             $query->where('tenant_id', $request->tenant_id);
         }
 
-        // Role-based filtering: Hiring managers only see their own requests
-        // But HR Managers and Admins see everything in their tenant (or globally)
+        // Role-based filtering:
+        // 1. Hiring managers only see their own requests
         if ($user->hasRole('hiring_manager') && !$user->hasRole('hr_manager') && !$user->hasRole('admin')) {
             $query->where('requested_by', $user->id);
+        }
+
+        // 2. TA managers see all approved requisitions in their tenant
+        if ($user->hasRole('ta_manager') && !$user->hasRole('admin') && !$user->hasRole('hr_manager')) {
+            $query->where('status', 'approved');
         }
 
         if ($request->has('search') && $request->search) {
@@ -74,6 +79,7 @@ class JobRequisitionController extends Controller
             'description' => 'nullable|string',
             'headcount' => 'required|integer|min:1',
             'priority' => 'required|in:low,medium,high,urgent',
+            'jd_file' => 'nullable|file|mimes:pdf,doc,docx|max:5120', // New validation
         ]);
 
         $user = $request->user();
@@ -81,6 +87,13 @@ class JobRequisitionController extends Controller
 
         if (!$tenantId) {
             return response()->json(['error' => 'No active company context found.'], 400);
+        }
+
+        $jdPath = null;
+        if ($request->hasFile('jd_file')) {
+            $file = $request->file('jd_file');
+            $filename = time() . '_' . $file->getClientOriginalName();
+            $jdPath = $file->storeAs('jds', $filename, 'public');
         }
 
         $requisition = JobRequisition::create([
@@ -95,6 +108,7 @@ class JobRequisitionController extends Controller
             'position_type' => $request->position_type ?? 'new',
             'priority' => $request->priority ?? 'medium',
             'status' => 'pending',
+            'jd_path' => $jdPath,
         ]);
 
         // Notify HR Managers

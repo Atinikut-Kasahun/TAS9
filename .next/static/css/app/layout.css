@@ -911,6 +911,9 @@ body {
 .h-screen{
   height: 100vh;
 }
+.h-40{
+  height: 10rem;
+}
 .max-h-80{
   max-height: 20rem;
 }
@@ -1830,6 +1833,9 @@ body {
 }
 .bg-white\/95{
   background-color: rgb(255 255 255 / 0.95);
+}
+.bg-emerald-50\/30{
+  background-color: rgb(236 253 245 / 0.3);
 }
 .bg-\[url\(\'data\:image\/svg\+xml\;charset\=US-ASCII\2c \%3Csvg\%20width\%3D\%2220\%22\%20height\%3D\%2220\%22\%20viewBox\%3D\%220\%200\%2020\%2020\%22\%20fill\%3D\%22none\%22\%20xmlns\%3D\%22http\%3A\/\/www\.w3\.org\/2000\/svg\%22\%3E\%3Cpath\%20d\%3D\%22M5\%207L10\%2012L15\%207\%22\%20stroke\%3D\%22\%239CA3AF\%22\%20stroke-width\%3D\%222\%22\%20stroke-linecap\%3D\%22round\%22\%20stroke-linejoin\%3D\%22round\%22\/\%3E\%3C\/svg\%3E\'\)\]{
   background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%3E%3Cpath%20d%3D%22M5%207L10%2012L15%207%22%20stroke%3D%22%239CA3AF%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22/%3E%3C/svg%3E');

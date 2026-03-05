@@ -15,6 +15,7 @@ Route::middleware('mock.auth')->group(function () {
 
     // Requisition API
     Route::prefix('v1')->group(function () {
+        Route::post('/logout', [\App\Http\Controllers\AuthController::class, 'logout']);
         // ─────────────────────────────────────────────────────────
         // TENANT-SCOPED ROUTES (Requires a valid company assignment)
         // ─────────────────────────────────────────────────────────

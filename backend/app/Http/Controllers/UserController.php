@@ -38,6 +38,10 @@ class UserController extends Controller
             });
         }
 
+        if ($request->has('tenant_id') && !empty($request->tenant_id)) {
+            $query->where('tenant_id', $request->tenant_id);
+        }
+
         if (!$user->hasRole('admin')) {
             if (!$user->tenant_id)
                 return response()->json(['message' => 'Unauthorized'], 403);

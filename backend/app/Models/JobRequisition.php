@@ -27,6 +27,7 @@ class JobRequisition extends Model
         'rejection_reason',
         'approved_at',
         'approved_by',
+        'jd_path',
     ];
 
     public function tenant(): BelongsTo

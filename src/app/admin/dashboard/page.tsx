@@ -16,13 +16,17 @@ interface Stats {
     total_tenants: number;
     total_active_jobs: number;
     total_active_jobs_trend?: number;
+    total_active_jobs_label?: string;
     total_candidates: number;
     total_candidates_trend?: number;
+    total_candidates_label?: string;
     total_employees: number;
     new_applications_today: number;
     new_applications_today_trend?: number;
+    new_applications_today_label?: string;
     active_events: number;
     active_events_trend?: number;
+    active_events_label?: string;
     tenants_breakdown: any[];
     recent_global_applicants: any[];
 }
@@ -252,7 +256,7 @@ function AddCompanyModal({ onClose, onAdded }: {
 
 /* ─── Company Detail Side Panel ──────────────────────────── */
 function CompanyPanel({
-    tenant, allUsers, onClose, onDeleteCompany, onDeleteUser, onUserAdded, onUserUpdated, onTenantUpdated, tenants,
+    tenant, allUsers, onClose, onDeleteCompany, onDeleteUser, onUserAdded, onUserUpdated, onTenantUpdated, tenants, usersLoading
 }: {
     tenant: any; allUsers: any[]; onClose: () => void;
     onDeleteCompany: (t: any) => void; onDeleteUser: (u: any) => void;
@@ -260,6 +264,7 @@ function CompanyPanel({
     onUserUpdated: (u: any) => void;
     onTenantUpdated: (t: any) => void;
     tenants: any[];
+    usersLoading?: boolean;
 }) {
     const companyUsers = allUsers.filter((u: any) => String(u.tenant_id) === String(tenant.id));
     const [showAddUser, setShowAddUser] = useState(false);
@@ -411,7 +416,9 @@ function CompanyPanel({
                     </div>
 
                     <div className="divide-y divide-gray-50">
-                        {companyUsers.length === 0 ? (
+                        {usersLoading ? (
+                            <div className="p-10 flex justify-center"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#1F7A6E]" /></div>
+                        ) : companyUsers.length === 0 ? (
                             <div className="p-10 text-center text-gray-400 text-sm italic">
                                 No users yet. Add the first team member!
                             </div>
@@ -728,6 +735,7 @@ function GlobalDashboard({ user }: { user: any }) {
     const [stats, setStats] = useState<Stats | null>(null);
     const [loading, setLoading] = useState(true);
     const [allUsers, setAllUsers] = useState<any[]>([]);
+    const [usersLoading, setUsersLoading] = useState(false);
     const [tenants, setTenants] = useState<any[]>([]);
 
     // Panel state
@@ -870,13 +878,11 @@ function GlobalDashboard({ user }: { user: any }) {
     const fetchAll = useCallback(async () => {
         setLoading(true);
         try {
-            const [dashData, usersData, tenantsData] = await Promise.all([
+            const [dashData, tenantsData] = await Promise.all([
                 apiFetch('/v1/dashboard'),
-                apiFetch('/v1/global-users?per_page=1000'),
                 apiFetch('/v1/tenants'),
             ]);
             setStats(dashData);
-            setAllUsers(usersData?.data || []);
             const rawTenants = Array.isArray(tenantsData) ? tenantsData : [];
             setTenants(rawTenants);
 
@@ -898,6 +904,23 @@ function GlobalDashboard({ user }: { user: any }) {
     useEffect(() => {
         fetchAll();
     }, [fetchAll]);
+
+    const fetchTenantUsers = useCallback(async (tenantId: string) => {
+        setUsersLoading(true);
+        try {
+            const data = await apiFetch(`/v1/global-users?tenant_id=${tenantId}&per_page=100`);
+            setAllUsers(data?.data || []);
+        } catch (err) { console.error('Failed to fetch tenant users', err); }
+        finally { setUsersLoading(false); }
+    }, []);
+
+    useEffect(() => {
+        if (selectedTenant) {
+            fetchTenantUsers(selectedTenant.id);
+        } else {
+            setAllUsers([]);
+        }
+    }, [selectedTenant, fetchTenantUsers]);
 
     // Sync tenants into stats breakdown on update
     const tenantsBreakdown = tenants.map(t => ({
@@ -1121,7 +1144,7 @@ function GlobalDashboard({ user }: { user: any }) {
                                         {loading ? (
                                             <div className="p-10 flex justify-center"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#1F7A6E]" /></div>
                                         ) : (
-                                            <div className="overflow-x-auto">
+                                            <div className="overflow-x-auto custom-scrollbar">
                                                 <table className="w-full">
                                                     <thead>
                                                         <tr className="border-b border-gray-50">
@@ -1283,6 +1306,7 @@ function GlobalDashboard({ user }: { user: any }) {
                     onUserAdded={handleUserAdded}
                     onUserUpdated={handleUserUpdated}
                     onTenantUpdated={handleTenantUpdated}
+                    usersLoading={usersLoading}
                 />
             )}
 
